@@ -2,7 +2,13 @@
 
 import re
 
-VARIABLES = {"resume_text", "job_description", "extracted_skills", "target_role"}
+VARIABLES = {
+    "resume_text",
+    "job_description",
+    "extracted_skills",
+    "target_role",
+    "retrieved_context",
+}
 TOKEN = re.compile(r"{{\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*}}")
 GUARD = """Use only evidence explicitly present in the supplied resume. Do not invent skills,
 qualifications, employers, achievements, metrics, or years of experience.

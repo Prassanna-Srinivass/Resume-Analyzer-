@@ -9,7 +9,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
-from . import db, llm
+from . import db, llm, rag
 from .analysis import MAX_UPLOAD, analyze, extract_file
 from .prompts import TASKS, render_prompt, validate_prompt
 
@@ -86,13 +86,30 @@ class TemplateInput(VersionInput):
         return value
 
 
-class RunInput(BaseModel):
+class RetrievalOptions(BaseModel):
+    rag_enabled: bool = False
+    rag_query: str = Field(default="", max_length=1000)
+    top_k: int = Field(default=5, ge=1, le=8, strict=True)
+
+
+class PreviewInput(VersionInput, RetrievalOptions):
+    pass
+
+
+class RunInput(RetrievalOptions):
     prompt_version_id: int = Field(gt=0)
     prompt_text: str | None = Field(default=None, max_length=20000)
     mode: Literal["demo", "live"] = "demo"
 
+    @field_validator("prompt_text")
+    @classmethod
+    def valid_draft(cls, value):
+        if value is not None:
+            validate_prompt(value)
+        return value
 
-class CompareInput(BaseModel):
+
+class CompareInput(RetrievalOptions):
     version_a: int = Field(gt=0)
     version_b: int = Field(gt=0)
     mode: Literal["demo", "live"] = "demo"
@@ -146,16 +163,38 @@ def decode_run(row):
     item = dict(row)
     item["feedback"] = json.loads(item["feedback"]) if item["feedback"] else None
     item["generation_settings"] = json.loads(item["generation_settings"])
+    item["retrieval_snapshot"] = (
+        json.loads(item["retrieval_snapshot"])
+        if item.get("retrieval_snapshot")
+        else None
+    )
     return item
 
 
-def prepare_run(analysis, request, config):
+def retrieval_for(analysis, request, mode=None):
+    if not request.rag_enabled:
+        return None
+    if mode == "demo":
+        raise HTTPException(
+            422, "RAG generation requires Live AI. Disable RAG to use the offline demo."
+        )
+    try:
+        return rag.retrieve(analysis, request.rag_query, request.top_k)
+    except llm.LLMError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def prepare_run(analysis, request, config, snapshot=None):
     version = get_version(request.prompt_version_id)
     prompt = (
         version["prompt_text"] if request.prompt_text is None else request.prompt_text
     )
     try:
-        rendered = render_prompt(prompt, values_for(analysis))
+        rendered = rag.render_with_evidence(
+            prompt, analysis, values_for(analysis), snapshot
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     try:
@@ -164,7 +203,13 @@ def prepare_run(analysis, request, config):
         )
     except llm.LLMError as exc:
         raise HTTPException(exc.status, str(exc)) from exc
+    saved_snapshot = (
+        {**snapshot, "citation_check": rag.citation_check(output, snapshot)}
+        if snapshot
+        else None
+    )
     return {
+        "retrieval_snapshot": json.dumps(saved_snapshot) if saved_snapshot else None,
         "analysis_id": analysis["id"],
         "prompt_version_id": version["id"],
         "prompt_name": version["name"],
@@ -200,6 +245,7 @@ def health():
         "live_available": bool(os.getenv("GEMINI_API_KEY", "").strip()),
         "live_model": llm.model_config("live")["model"],
         "demo_model": llm.model_config("demo")["model"],
+        "embedding_model": os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001"),
     }
 
 
@@ -323,18 +369,79 @@ def save_version(tid: int, body: VersionInput):
     return get_version(vid)
 
 
-@app.post("/api/analysis/{aid}/preview")
-def preview(aid: int, body: VersionInput):
-    return {
-        "rendered_prompt": render_prompt(
-            body.prompt_text, values_for(get_analysis(aid))
+@app.get("/api/analysis/{aid}/documents")
+def list_documents(aid: int):
+    get_analysis(aid)
+    return rag.documents(aid)
+
+
+@app.post("/api/analysis/{aid}/documents", status_code=201)
+def add_document(aid: int, file: UploadFile = File(...)):
+    try:
+        analysis = get_analysis(aid)
+        return rag.index_upload(analysis, file.filename, file.file.read(MAX_UPLOAD + 1))
+    except llm.LLMError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    finally:
+        file.file.close()
+
+
+@app.post("/api/analysis/{aid}/index-resume", status_code=201)
+def index_resume(aid: int):
+    analysis = get_analysis(aid)
+    try:
+        return rag.index_document(
+            analysis,
+            "Saved resume",
+            [{"text": analysis["resume_text"], "page": None}],
+            "resume",
         )
+    except llm.LLMError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.delete("/api/analysis/{aid}/documents/{did}", status_code=204)
+def delete_document(aid: int, did: int):
+    get_analysis(aid)
+    with db.connect() as conn:
+        if not conn.execute(
+            "DELETE FROM rag_documents WHERE id=? AND analysis_id=?", (did, aid)
+        ).rowcount:
+            raise HTTPException(404, "Document not found in this analysis.")
+
+
+@app.post("/api/analysis/{aid}/retrieve")
+def retrieve_evidence(aid: int, body: RetrievalOptions):
+    return retrieval_for(
+        get_analysis(aid), body.model_copy(update={"rag_enabled": True})
+    )
+
+
+@app.post("/api/analysis/{aid}/preview")
+def preview(aid: int, body: PreviewInput):
+    analysis = get_analysis(aid)
+    snapshot = retrieval_for(analysis, body)
+    return {
+        "rendered_prompt": rag.render_with_evidence(
+            body.prompt_text, analysis, values_for(analysis), snapshot
+        ),
+        "retrieval_snapshot": snapshot,
     }
 
 
 @app.post("/api/analysis/{aid}/run-prompt", status_code=201)
 def run_prompt(aid: int, body: RunInput):
-    record = prepare_run(get_analysis(aid), body, llm.model_config(body.mode))
+    analysis = get_analysis(aid)
+    get_version(body.prompt_version_id)  # Validate before any billable retrieval.
+    snapshot = retrieval_for(analysis, body, body.mode)
+    config = llm.model_config(body.mode)
+    if snapshot:
+        config["rag_enabled"] = True
+    record = prepare_run(analysis, body, config, snapshot)
     with db.connect() as conn:
         return save_run(conn, record)
 
@@ -347,9 +454,15 @@ def compare(aid: int, body: CompareInput):
     if va["template_id"] != vb["template_id"]:
         raise HTTPException(422, "Compare versions of the same prompt template.")
     analysis, config = get_analysis(aid), llm.model_config(body.mode)
+    snapshot = retrieval_for(analysis, body, body.mode)
+    if snapshot:
+        config["rag_enabled"] = True
+    # Retrieve once: both prompts receive exactly the same evidence snapshot.
     # Same immutable inputs/model/settings; persist the pair atomically.
     records = [
-        prepare_run(analysis, RunInput(prompt_version_id=v, mode=body.mode), config)
+        prepare_run(
+            analysis, RunInput(prompt_version_id=v, mode=body.mode), config, snapshot
+        )
         for v in [body.version_a, body.version_b]
     ]
     cid = str(uuid.uuid4())

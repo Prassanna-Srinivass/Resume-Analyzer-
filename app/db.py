@@ -49,6 +49,26 @@ def initialize():
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
         CREATE INDEX IF NOT EXISTS runs_analysis ON runs(analysis_id);
         """)
+        db.executescript("""
+        CREATE TABLE IF NOT EXISTS rag_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis_id INTEGER NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
+            filename TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT NOT NULL,
+            embedding_model TEXT NOT NULL, dimensions INTEGER NOT NULL, chunk_count INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            UNIQUE(analysis_id, fingerprint));
+        CREATE TABLE IF NOT EXISTS rag_chunks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL REFERENCES rag_documents(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL, page INTEGER, text TEXT NOT NULL, embedding TEXT NOT NULL,
+            UNIQUE(document_id, position));
+        CREATE INDEX IF NOT EXISTS rag_documents_analysis ON rag_documents(analysis_id);
+        CREATE INDEX IF NOT EXISTS rag_chunks_document ON rag_chunks(document_id);
+        """)
+        db.execute("BEGIN IMMEDIATE")
+        columns = {row[1] for row in db.execute("PRAGMA table_info(runs)")}
+        if "retrieval_snapshot" not in columns:
+            db.execute("ALTER TABLE runs ADD COLUMN retrieval_snapshot TEXT")
         if db.execute("SELECT COUNT(*) FROM templates").fetchone()[0] == 0:
             for name, task, prompt in seed_templates():
                 tid = db.execute(

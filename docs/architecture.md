@@ -36,3 +36,15 @@ The plain JavaScript UI is served by FastAPI on the same origin. Its views are R
 | Existing LLM integration | None existed; one Google Gemini adapter supplied |
 | Existing semantic/RAG components | None existed; explicitly documented future work |
 | Docker / CI/CD | Not added |
+
+## Optional RAG path (Python edition)
+
+`app/rag.py` extracts supporting documents into page-aware text sections, splits them into at most 80 chunks of 1,500 characters with 200-character overlap, requests 768-dimensional Gemini embeddings, normalizes vectors, and stores them in SQLite. Each saved analysis owns an independent collection of up to 10 documents. PDF page numbers are preserved; DOCX/TXT are cited by chunk because pagination is not reliably defined. Resume indexing uses saved text and therefore has chunk references, not original PDF page references.
+
+`rag_documents` stores analysis association, filename, source kind, content/settings fingerprint and model metadata. `rag_chunks` stores passages, page/position and vector JSON. Both cascade on analysis deletion. Repeated identical content/settings within the same analysis reuses its index. Different analyses do not share evidence. Model changes require explicit removal and reindexing; mixed-model comparisons are rejected.
+
+At request time, a user question (or up to 1,000 characters of the role/job description) is embedded with RETRIEVAL_QUERY. Exact cosine search selects up to eight positive-similarity passages. The full original resume remains in context as [RESUME]; retrieved support augments it, so token/cost reduction is not guaranteed. The job description is requirements data, never candidate evidence.
+
+`main.py` retrieves once for a two-prompt comparison and passes the same snapshot into both runs. `llm.py` uses the RAG system guard for these runs. `{{retrieved_context}}` is optional: evidence is appended when it is absent, preserving existing immutable templates. Runs store the exact retrieval settings, query, passages and source-ID checks in an added nullable `retrieval_snapshot` column; old runs remain readable.
+
+Source-ID validation only detects missing or unknown citation IDs, not whether an excerpt actually supports the claim. Documents are untrusted input and instructions contained in them are not authorized. Removing a document stops future retrieval but does not erase historical snapshots; deleting the analysis removes its snapshots, chunks and documents. Previously exported JSON files and external provider retention are outside this deletion boundary.

@@ -2,7 +2,11 @@
 
 **ResumeLab** is a runnable Python/FastAPI application that compares a resume with a job description, then lets you edit, version, run, compare, and evaluate evidence-based analysis prompts.
 
-Built from the supplied **Resume_Analyser_Prompt_Engineering_Updated_README.md** and **Resume_Analyser_Prompt_Engineering_Project_Guide.pdf**. The target repository was empty at inspection: there was no existing analyzer, frontend, database, LLM service, or RAG implementation to preserve. This project supplies the minimum analyzer foundation and the requested prompt module. It does **not** claim to implement semantic embeddings, ChromaDB, RAG, model training, automated hiring decisions, Docker, or CI/CD.
+Built from the supplied **Resume_Analyser_Prompt_Engineering_Updated_README.md** and **Resume_Analyser_Prompt_Engineering_Project_Guide.pdf**. The target repository was empty at inspection: there was no existing analyzer, frontend, database, LLM service, or RAG implementation to preserve. This project supplies the minimum analyzer foundation and the requested prompt module. The project now also includes optional Gemini embedding retrieval (RAG) over each analysis’s uploaded evidence. It does not implement ChromaDB, model training, automated hiring decisions, Docker, or CI/CD.
+
+[Open the online application](https://resumelab-prassanna-online.iuwcqd2266703mjlm.chatgpt.site) — private to the site owner; sign in with the owning ChatGPT account. Click **Try a sample** to verify the working workflow without an API key.
+
+The hosted edition preserves this interface and workflows using a JavaScript Worker and durable D1 storage; the Python/FastAPI source in this repository remains the local/server edition. Hosted live mode uses the same Gemini model and needs `GEMINI_API_KEY` in Sites runtime secrets. Local `.env` changes do not configure the hosted app.
 
 [Open the read-only sample output](docs/sample-output.html)
 
@@ -13,13 +17,14 @@ The screenshot is a **read-only rendering of actual backend output** using ficti
 - Upload **PDF, DOCX, or UTF-8 TXT** resumes (5 MB limit), or paste resume text.
 - Add a target role and job description; review detected skills, matching evidence, missing keywords, and lexical similarity.
 - Six reusable templates: **Resume Summary, Skill Extractor, Job Skill Matcher, Match Explanation, Resume Improver, Interview Questions**.
-- Edit prompts with four validated placeholders; preview the exact populated prompt.
+- Edit prompts with five validated placeholders; preview the exact populated prompt.
 - Create custom templates and save **immutable, numbered versions** with change notes.
 - Run saved versions or unsaved edits. Every run records the exact template and rendered prompt, model, settings, output, mode, analysis reference, and timestamp.
 - Compare two versions of one template using the **same saved inputs and model settings**.
 - Rate relevance, accuracy, coverage, and clarity (1–5), and add feedback.
 - Reopen history, reuse prompts, export analysis/runs as JSON, and delete an analysis with its associated runs.
 - Switch between a **clearly labelled offline demo** and server-side **Google Gemini live generation**.
+- Optional **RAG**: index the saved resume and PDF/DOCX/TXT supporting documents, retrieve relevant passages, inspect source references, and preserve exact evidence snapshots with prompt comparisons.
 
 ## Quick start on Windows
 
@@ -62,6 +67,7 @@ Create **`.env` in the project root**, alongside `requirements.txt` and `.env.ex
 ```dotenv
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 DATABASE_PATH=data/resume_analyzer.db
 ```
 
@@ -86,6 +92,22 @@ Restart the server, then select **Live AI · Google Gemini** in the upper-right 
 
 Editing resume/job inputs creates a new analysis on the next run, preserving earlier run provenance. The `PUT` prompt endpoint also creates a new version instead of mutating old history.
 
+## Use RAG (optional)
+
+RAG augments the full saved resume with relevant passages from **that analysis’s** supporting documents. It does not change the dictionary skill-coverage score. The only external service is Gemini: the same `GEMINI_API_KEY` needs access to both the generation and embedding models. Internet access and adequate API quota are required. No extra Python packages, vector-database account, or LangChain installation are needed.
+
+1. Update your code, install `requirements.txt`, and add `GEMINI_EMBEDDING_MODEL=gemini-embedding-001` to your existing `.env`. Keep your actual key out of Git.
+2. Restart the server. Existing SQLite data is upgraded automatically; back up your database before updating.
+3. Analyze a resume and job description, then open **Prompt studio → Supporting evidence**.
+4. Click **Index saved resume**, or upload a portfolio/project report using **Upload and index a supporting document**. Add only documents belonging to the current candidate. Indexing sends extracted text to Gemini for embeddings.
+5. Enter an optional evidence question, choose 3, 5 or 8 passages, and click **Preview retrieved evidence**. Query embedding is a provider call. Inspect the passages rather than treating similarity as factual confidence.
+6. Check **Use RAG for this run**, select **Live AI · Google Gemini**, and run a prompt. Evidence is appended automatically to existing templates. Optionally place `{{retrieved_context}}` in an edited prompt.
+7. Compare versions: one retrieval snapshot is shared by both generations. Source IDs and citation warnings appear with the output; exact passages persist in history and JSON exports.
+
+The evidence question controls retrieval; the Instructions field still controls the output task. Preview and Run retrieve separately and may differ if documents/settings change between them. Each comparison retrieves once internally.
+
+Use direct mode for short resumes without supporting documents. RAG is **not available for rule-based demo generation** and never silently falls back. [Full RAG setup, architecture, limitations, and Data Analyst walkthrough](docs/rag-guide.md).
+
 ## How matching works
 
 The baseline intentionally stays small and inspectable:
@@ -107,7 +129,8 @@ app/
   analysis.py         File extraction, skill dictionary and lexical baseline
   prompts.py          Six seed templates and safe placeholder replacement
   llm.py              Google Gemini adapter and explicit offline demo
-  db.py               SQLite schema, transactions and seed records
+  db.py               SQLite schema, migrations, transactions and seed records
+  rag.py              Chunking, Gemini embeddings, cosine retrieval and citations
   static/             HTML, CSS, JavaScript application
 examples/             Fictional resume and job description
 scripts/
@@ -139,7 +162,7 @@ Interactive API documentation: **http://127.0.0.1:8000/docs**. Machine-readable 
 | GET | `/api/analysis/{id}/prompt-runs` | Retrieve run history |
 | POST | `/api/prompt-runs/{id}/feedback` | Save manual ratings and a note |
 
-Required placeholder: `{{resume_text}}`. Optional placeholders: `{{job_description}}`, `{{extracted_skills}}`, `{{target_role}}`. Unknown or malformed placeholders, empty prompts, oversized inputs, unsupported files and invalid ratings are rejected. Substitution is one pass: braces in a resume are not treated as template code.
+Required placeholder: `{{resume_text}}`. Optional placeholders: `{{job_description}}`, `{{extracted_skills}}`, `{{target_role}}`, `{{retrieved_context}}`. Unknown or malformed placeholders, empty prompts, oversized inputs, unsupported files and invalid ratings are rejected. Substitution is one pass: braces in a resume are not treated as template code.
 
 ## Tests and reproducible output
 
@@ -157,6 +180,6 @@ SQLite defaults to `data/resume_analyzer.db`, relative to the working directory.
 
 This is a **single-user local application**, with no login or tenant isolation, as requested by the project plan. Bind to `127.0.0.1` for local use. Before exposing it publicly, add authentication, per-user data separation, upload/request limits at the web server, HTTPS, and appropriate retention controls. GitHub stores the source; it does not automatically host this Python backend. No public deployment was created.
 
-Password-protected, image-only/scanned, unreadable, oversized PDFs, and legacy `.doc` files are not supported. OCR, semantic embeddings, RAG, multi-provider support, and batch candidate ranking remain future work rather than claimed functionality.
+Password-protected, image-only/scanned, unreadable, oversized PDFs, and legacy `.doc` files are not supported. OCR, multi-provider generation, automated citation entailment checking, and batch candidate ranking are not implemented. RAG uses an exact cosine scan over a bounded local collection; it is not a large-scale vector search service.
 
 Model and REST references: [Gemini 3.5 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite), [generateContent API](https://ai.google.dev/api/generate-content).

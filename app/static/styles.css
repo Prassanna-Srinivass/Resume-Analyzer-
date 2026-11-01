@@ -1261,3 +1261,12 @@ dialog::backdrop {
         transition: background .15s ease
     }
 }
+
+/* Evidence retrieval panel */
+.rag-section { margin-bottom: 24px; }
+.rag-switch { display:flex; align-items:center; gap:10px; font-size:14px; }
+.rag-switch input { width:18px; height:18px; accent-color:#167969; }
+.rag-document { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid #e5ecea; overflow-wrap:anywhere; }
+.rag-warning { color:#9b3a1b; font-weight:600; }
+.rag-section details, #run-evidence details { margin-top:16px; }
+@media(max-width:650px) { .rag-section .section-top, .rag-document { align-items:flex-start; flex-direction:column; } }

@@ -83,6 +83,7 @@ function showView(view) {
         history: 'Analysis history'
     } [view];
     if (view === 'history') return loadHistory();
+    if (view === 'studio') return loadDocuments();
 }
 for (const b of document.querySelectorAll('.nav')) b.addEventListener('click', () => action(() => showView(b.dataset.view)));
 
@@ -108,6 +109,8 @@ async function ensureAnalysis() {
         clearRun();
         $('comparison-output').replaceChildren();
         renderReport();
+        $('retrieved-evidence').replaceChildren();
+        await loadDocuments();
     }
     return state.analysis;
 }
@@ -140,6 +143,7 @@ function renderReport() {
 
 function clearRun() {
     state.run = null;
+    $('run-evidence').replaceChildren();
     $('feedback-panel').hidden = true;
     $('single-output').textContent = 'Choose a template and run it against this resume.';
     $('single-output').classList.add('empty-output');
@@ -232,15 +236,18 @@ bind('save-version', async () => {
 bind('preview-prompt', async () => {
     const a = await ensureAnalysis();
     const p = await post(`/api/analysis/${a.id}/preview`, {
-        prompt_text: $('prompt-editor').value
+        prompt_text: $('prompt-editor').value,
+        ...ragOptions()
     });
     $('prompt-preview').textContent = p.rendered_prompt;
+    renderEvidence($('retrieved-evidence'), p.retrieval_snapshot);
     $('preview-panel').hidden = false;
     $('preview-panel').open = true;
 });
 
 function showRun(run) {
     state.run = run;
+    renderEvidence($('run-evidence'), run.retrieval_snapshot);
     $('single-output').textContent = run.output_text;
     $('single-output').classList.remove('empty-output');
     $('output-mode').textContent = run.mode === 'demo' ? 'Offline demo · not AI' : 'Live AI';
@@ -254,7 +261,8 @@ bind('run-prompt', async () => {
     const run = await post(`/api/analysis/${a.id}/run-prompt`, {
         prompt_version_id: Number($('version-select').value),
         prompt_text: $('prompt-editor').value,
-        mode: $('mode').value
+        mode: $('mode').value,
+        ...ragOptions()
     });
     showRun(run);
     notify(run.mode === 'demo' ? 'Offline report saved. Demo output does not respond to prompt edits; use Live AI for prompt experiments.' : 'Live AI result saved. Review the evidence before relying on the output.');
@@ -277,7 +285,8 @@ bind('compare', async () => {
     const result = await post(`/api/analysis/${a.id}/compare`, {
         version_a: Number($('compare-a').value),
         version_b: Number($('compare-b').value),
-        mode: $('mode').value
+        mode: $('mode').value,
+        ...ragOptions()
     });
     $('comparison-output').replaceChildren(...result.runs.map((run, i) => {
         const v = state.template.versions.find(v => v.id === run.prompt_version_id);
@@ -296,7 +305,8 @@ bind('compare', async () => {
         box.append(d, node('pre', run.output_text, 'output'), evaluate);
         return box;
     }));
-    notify('Comparison saved: identical resume, job description, model and generation settings.');
+    renderEvidence($('retrieved-evidence'), result.runs[0].retrieval_snapshot);
+    notify('Comparison saved: identical resume, job description, retrieved evidence, model and generation settings.');
 });
 $('new-template').addEventListener('click', () => {
     $('template-error').textContent = '';
@@ -332,11 +342,14 @@ async function loadHistory() {
             clearRun();
             $('comparison-output').replaceChildren();
             renderReport();
+            $('rag-enabled').checked = false;
+            $('retrieved-evidence').replaceChildren();
+            await loadDocuments();
             await loadRuns();
         }));
         const remove = node('button', 'Delete analysis', 'button ghost');
         remove.addEventListener('click', () => action(async () => {
-            if (!confirm('Delete this analysis, its resume text, and all associated runs? This cannot be undone.')) return;
+            if (!confirm('Delete this analysis, its resume, indexed documents, and all associated runs? This cannot be undone.')) return;
             await api(`/api/analysis/${a.id}`, {
                 method: 'DELETE'
             });
@@ -355,6 +368,8 @@ async function loadHistory() {
                     target_role: ''
                 });
             }
+            await loadDocuments();
+            $('retrieved-evidence').replaceChildren();
             await loadHistory();
             notify('Analysis and associated runs deleted.');
         }));
@@ -377,7 +392,7 @@ async function loadRuns() {
         const box = node('article', undefined, 'history-run');
         box.append(node('h3', `#${run.id} · ${run.prompt_name}`), node('p', `${run.model_name} · ${date(run.created_at)}`), node('pre', run.output_text, 'output'));
         const details = node('details');
-        details.append(node('summary', 'Exact prompt and saved evaluation'), node('pre', run.prompt_text + '\n\nEVALUATION\n' + (run.feedback ? JSON.stringify(run.feedback, null, 2) : 'Not rated yet')));
+        details.append(node('summary', 'Exact prompt and saved evaluation'), node('pre', run.rendered_prompt + '\n\nRETRIEVAL SNAPSHOT\n' + JSON.stringify(run.retrieval_snapshot, null, 2) + '\n\nEVALUATION\n' + (run.feedback ? JSON.stringify(run.feedback, null, 2) : 'Not rated yet')));
         box.append(details);
         const reuse = node('button', 'Reuse prompt & review output', 'button secondary');
         reuse.addEventListener('click', () => action(async () => {
@@ -389,6 +404,11 @@ async function loadRuns() {
                 $('prompt-editor').value = run.prompt_text;
                 $('draft-label').textContent = 'Exact prompt restored from run';
             }
+            $('rag-enabled').checked = !!run.retrieval_snapshot;
+            $('rag-query').value = run.retrieval_snapshot?.query || '';
+            $('rag-top-k').value = String(run.retrieval_snapshot?.top_k || 5);
+            $('mode').value = run.mode;
+            updateMode();
             showRun(run);
             await showView('studio');
         }));
@@ -425,4 +445,78 @@ action(async () => {
     state.live = health.live_available;
     updateMode();
     await loadTemplates();
+});
+
+function ragOptions() {
+    return {rag_enabled: $('rag-enabled').checked, rag_query: $('rag-query').value.trim(), top_k: Number($('rag-top-k').value)};
+}
+function renderEvidence(container, snapshot) {
+    container.replaceChildren();
+    if (!snapshot) return;
+    const panel = node('details');
+    panel.open = true;
+    panel.append(node('summary', `Retrieved evidence · ${snapshot.sources.length} passages`));
+    panel.append(node('p', 'Full saved resume is also supplied as [RESUME]. Scores indicate similarity, not factual accuracy or candidate suitability.', 'helper'));
+    for (const source of snapshot.sources) {
+        const item = node('article', undefined, 'evidence-item');
+        item.append(node('strong', `[${source.source_id}] ${source.filename} · ${source.page ? 'Page '+source.page : 'Chunk '+source.chunk}`), node('p', `Cosine similarity: ${source.similarity}`, 'helper'), node('pre', source.text));
+        panel.append(item);
+    }
+    if (!snapshot.sources.length) panel.append(node('p', 'No relevant indexed passages retrieved. Do not infer missing ability.'));
+    for (const warning of snapshot.citation_check?.warnings || []) panel.append(node('p', warning, 'rag-warning'));
+    if (snapshot.citation_check) panel.append(node('p', snapshot.citation_check.note, 'helper'));
+    container.append(panel);
+}
+async function loadDocuments() {
+    $('rag-documents').replaceChildren();
+    if (!state.analysis) {
+        $('rag-documents').append(node('p', 'Analyze a resume first to create its evidence collection.', 'helper'));
+        return;
+    }
+    const docs = await api(`/api/analysis/${state.analysis.id}/documents`);
+    $('rag-documents').append(node('p', `Analysis #${state.analysis.id} · ${docs.length}/10 indexed documents`, 'helper'));
+    for (const doc of docs) {
+        const item = node('div', undefined, 'rag-document');
+        item.append(node('span', `${doc.filename} · ${doc.chunk_count} chunks · ${doc.embedding_model}`));
+        const remove = node('button', 'Remove from index', 'button ghost');
+        remove.addEventListener('click', () => action(async () => {
+            if (!confirm('Remove this document from future retrieval? Existing run snapshots retain previously used passages. Delete the analysis to remove those too.')) return;
+            await api(`/api/analysis/${state.analysis.id}/documents/${doc.id}`, {method:'DELETE'});
+            $('retrieved-evidence').replaceChildren();
+            await loadDocuments();
+        }));
+        item.append(remove); $('rag-documents').append(item);
+    }
+}
+bind('refresh-documents', loadDocuments);
+bind('index-resume', async () => {
+    const a = await ensureAnalysis();
+    notify('Indexing the saved resume with Gemini embeddings…');
+    const result = await post(`/api/analysis/${a.id}/index-resume`, {});
+    await loadDocuments();
+    notify(result.cached ? 'This resume is already indexed; reused the existing index.' : 'Resume indexed. Add supporting documents or preview retrieved evidence.');
+});
+$('rag-file').addEventListener('change', () => action(async () => {
+    const file = $('rag-file').files[0];
+    if (!file) return;
+    try {
+        if (file.size > 5*1024*1024) throw new Error('Choose a file no larger than 5 MB.');
+        const a = await ensureAnalysis(), data = new FormData();
+        data.append('file', file);
+        notify('Extracting and indexing the document with Gemini embeddings…');
+        const result = await api(`/api/analysis/${a.id}/documents`, {method:'POST', body:data});
+        await loadDocuments();
+        $('retrieved-evidence').replaceChildren();
+        notify(result.cached ? 'Document already indexed; reused the existing index.' : 'Supporting document indexed for this analysis.');
+    } finally { $('rag-file').value = ''; }
+}));
+bind('retrieve-evidence', async () => {
+    const a = await ensureAnalysis();
+    const snapshot = await post(`/api/analysis/${a.id}/retrieve`, ragOptions());
+    renderEvidence($('retrieved-evidence'), snapshot);
+    notify('Evidence retrieved. Enable Use RAG and select Live AI to use it in a prompt run. Each run retrieves again; comparisons share one snapshot.');
+});
+for (const id of ['rag-enabled','rag-query','rag-top-k']) $(id).addEventListener('change', () => {
+    $('preview-panel').hidden = true;
+    $('retrieved-evidence').replaceChildren();
 });

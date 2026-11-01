@@ -1,0 +1,22 @@
+FICTIONAL TEST DOCUMENT — not a real person's employment record.
+Candidate: Priya Sharma (fictional example)
+Project: Retail sales dashboard and reconciliation
+
+SQL DATA VALIDATION
+I joined orders, order items and returns using SQL. Before joining, I checked
+whether order IDs were unique at the expected table grain. I compared row counts
+and revenue totals before and after the joins to identify duplicated orders.
+I used SQL queries to flag missing product categories and inconsistent dates.
+
+POWER BI DASHBOARD
+I built a Power BI dashboard with monthly revenue, order volume and average
+order value. I reconciled dashboard totals against the validated SQL aggregates
+and documented how returns affected revenue. Date and region filters were added.
+
+PYTHON CLEANING
+I used Python and pandas to standardize product category names, inspect missing
+values and identify duplicate records. Cleaning decisions were documented.
+
+LIMITATIONS
+This report does not claim AWS, Tableau, A/B testing, or production deployment
+experience. It does not establish a revenue increase or a measured time saving.

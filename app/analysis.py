@@ -142,7 +142,7 @@ def analyze(resume, job):
     }
 
 
-def extract_file(filename, data):
+def extract_sections(filename, data):
     if not data or len(data) > MAX_UPLOAD:
         raise ValueError("Upload a nonempty file up to 5 MB.")
     ext = Path(filename or "").suffix.lower()
@@ -157,7 +157,11 @@ def extract_file(filename, data):
                 )
             if len(reader.pages) > 40:
                 raise ValueError("PDFs must have at most 40 pages.")
-            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            sections = [
+                {"text": page.extract_text() or "", "page": i + 1}
+                for i, page in enumerate(reader.pages)
+            ]
+            text = "\n".join(s["text"] for s in sections)
         elif ext == ".docx":
             with ZipFile(BytesIO(data)) as archive:
                 if sum(i.file_size for i in archive.infolist()) > 20 * 1024 * 1024:
@@ -184,4 +188,8 @@ def extract_file(filename, data):
         )
     if len(text) > 50000:
         raise ValueError("Extracted resume exceeds 50,000 characters.")
-    return text.strip()
+    return sections if ext == ".pdf" else [{"text": text.strip(), "page": None}]
+
+
+def extract_file(filename, data):
+    return "\n".join(s["text"] for s in extract_sections(filename, data)).strip()

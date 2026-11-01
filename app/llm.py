@@ -81,6 +81,11 @@ def generate(prompt, task, analysis, mode, config):
     """Generate server-side through Gemini; never fall back to a demo on failure."""
     if mode == "demo":
         return demo_output(task, analysis)
+    system_guard = GUARD
+    if config.get("rag_enabled"):
+        from .rag import RAG_GUARD
+
+        system_guard = RAG_GUARD
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         raise LLMError(
@@ -99,7 +104,7 @@ def generate(prompt, task, analysis, mode, config):
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                 headers={"x-goog-api-key": key},
                 json={
-                    "systemInstruction": {"parts": [{"text": GUARD}]},
+                    "systemInstruction": {"parts": [{"text": system_guard}]},
                     "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                     "generationConfig": {
                         "maxOutputTokens": config.get("max_output_tokens", 4096)
