@@ -10,6 +10,8 @@ from app import db, rag, llm
 from app.analysis import extract_sections
 from app.main import get_analysis
 
+REAL_EMBED = rag.embed
+
 
 def make_analysis(client, text="Python analyst with SQL and Power BI."):
     return client.post(
@@ -236,10 +238,9 @@ def test_gemini_embedding_contract_normalization_batching(monkeypatch):
         assert kwargs["headers"]["x-goog-api-key"] == "test-key"
         requests = kwargs["json"]["requests"]
         calls.append(requests)
-        assert requests[0]["embedContentConfig"] == {
-            "taskType": "RETRIEVAL_DOCUMENT",
-            "outputDimensionality": 768,
-        }
+        assert requests[0]["taskType"] == "RETRIEVAL_DOCUMENT"
+        assert requests[0]["outputDimensionality"] == 768
+        assert "embedContentConfig" not in requests[0]
         assert requests[0]["model"] == "models/gemini-embedding-001"
         raw = [3.0, 4.0] + [0.0] * 766
         return httpx.Response(
@@ -459,3 +460,62 @@ def test_embedding_network_and_non_json_are_distinct(monkeypatch):
     with pytest.raises(llm.LLMError, match="not valid JSON") as err:
         rag.embed(["private resume"], "RETRIEVAL_DOCUMENT", rag.settings())
     assert "private" not in str(err.value)
+
+
+def test_batch_size_regression_with_real_adapter(client, monkeypatch):
+    """Simulate the provider's 3072 default when request-level size is absent."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(rag, "embed", REAL_EMBED)
+    original_post = httpx.Client.post
+    observed = []
+
+    def post(self, url, **kwargs):
+        if not str(url).startswith("https://generativelanguage.googleapis.com/"):
+            return original_post(self, url, **kwargs)
+        requests = kwargs["json"]["requests"]
+        vectors = []
+        for request in requests:
+            # An old nested request returns 3072 and fails the app validation.
+            size = request.get("outputDimensionality", 3072)
+            observed.append((request.get("taskType"), size))
+            vectors.append({"values": [3.0, 4.0] + [0.0] * (size - 2)})
+        return httpx.Response(200, json={"embeddings": vectors})
+
+    monkeypatch.setattr(httpx.Client, "post", post)
+    response = client.post(
+        "/api/analysis",
+        json={"resume_text": "SQL validation", "job_description": "SQL analyst"},
+    )
+    assert response.status_code == 201, response.text
+    aid = response.json()["id"]
+    result = client.post(f"/api/analysis/{aid}/retrieve", json={})
+    assert result.status_code == 200, result.text
+    assert result.json()["sources"][0]["text"] == "SQL validation"
+    assert observed == [("RETRIEVAL_DOCUMENT", 768), ("RETRIEVAL_QUERY", 768)]
+    with db.connect() as conn:
+        stored = json.loads(
+            conn.execute("SELECT embedding FROM rag_chunks").fetchone()[0]
+        )
+    assert len(stored) == 768 and stored[:2] == [0.6, 0.8]
+
+
+def test_request_contract_upgrade_rebuilds_both_caches(
+    client, fake_embeddings, monkeypatch
+):
+    current_settings = rag.settings
+    monkeypatch.setattr(
+        rag, "settings", lambda: {**current_settings(), "index_version": 1}
+    )
+    a = make_analysis(client)
+    aid = a["id"]
+    old = client.post(f"/api/analysis/{aid}/retrieve", json={}).json()
+    assert len(fake_embeddings) == 2
+    monkeypatch.setattr(rag, "settings", current_settings)
+    result = client.post(f"/api/analysis/{aid}/retrieve", json={}).json()
+    assert result["settings"]["index_version"] == 2
+    assert result["sources"][0]["document_id"] != old["sources"][0]["document_id"]
+    assert not result["query_cached"]
+    assert len(fake_embeddings) == 4  # both document and query recomputed
+    again = client.post(f"/api/analysis/{aid}/retrieve", json={}).json()
+    assert again["query_cached"] and len(fake_embeddings) == 4
+    assert len(rag.documents(aid)) == 1

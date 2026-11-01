@@ -41,7 +41,9 @@ def settings():
         "dimensions": DIMENSIONS,
         "chunk_size": CHUNK_SIZE,
         "overlap": OVERLAP,
-        "index_version": 1,
+        # v2 sends Developer API task/size fields at request level.
+        # Refresh document and query vectors together after the contract fix.
+        "index_version": 2,
     }
 
 
@@ -80,10 +82,10 @@ def embed(texts, task_type, config):
                             {
                                 "model": f"models/{config['model']}",
                                 "content": {"parts": [{"text": text}]},
-                                "embedContentConfig": {
-                                    "taskType": task_type,
-                                    "outputDimensionality": DIMENSIONS,
-                                },
+                                # Match google-genai's Developer API batch
+                                # serialization (not Vertex embedContentConfig).
+                                "taskType": task_type,
+                                "outputDimensionality": DIMENSIONS,
                             }
                             for text in batch
                         ]

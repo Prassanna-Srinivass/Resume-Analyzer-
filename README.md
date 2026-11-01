@@ -134,3 +134,12 @@ The old message “Gemini returned unavailable or invalid embeddings” combined
 ```
 
 This sends one synthetic text passage with the same embedding settings as the application. It does not send your resume, print your key, or write to the database. It uses API quota. Output distinguishes network failures, invalid JSON, missing vectors and unexpected dimensions. Share only this diagnostic output when requesting help, never `.env` or raw request headers. A successful result shows `ok: true` and `dimensions: 768`. A dimension mismatch must be investigated rather than silently mixing incompatible vectors. “No partial index was saved” means the failed operation did not commit an incomplete resume index; it does not say existing analyses were erased.
+
+
+### Fix for “Expected 768 dimensions, received 3072”
+
+The app previously nested `taskType` and `outputDimensionality` inside `embedContentConfig`. The Gemini Developer API batch serialization used by Google's Python SDK sends these fields directly in each `requests[]` item. The adapter now uses that request format for both documents and queries and still validates exactly 768 dimensions. It does not silently truncate vectors or change the database to 3072 dimensions.
+
+Pull the latest code, restart the server and rerun `scripts/check_embeddings.py`. Expected diagnostic: `ok: true`, `dimensions: 768`. Do not delete your database or change the generation model. Index version 2 automatically refreshes old resume embeddings before retrieval and uses a separate fingerprint for new query vectors. Existing saved histories are preserved. The fix is covered by a simulated provider that returns 3072 dimensions when the request-level size field is absent; live confirmation requires your configured API key.
+
+Request serialization reference: [Google Python SDK, Developer API embedding converter](https://github.com/googleapis/python-genai/blob/main/google/genai/models.py).
