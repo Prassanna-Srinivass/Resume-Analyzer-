@@ -1,0 +1,2 @@
+Python Backend Developer
+We need a developer with Python, FastAPI, PostgreSQL, SQL, REST APIs, Git, Docker, AWS, Kubernetes, and Redis. The role includes building backend services, maintaining database queries, collaborating on code reviews, and supporting cloud deployments.

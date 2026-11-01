@@ -1,0 +1,7 @@
+{
+  "name": "resume-analyzer-preview",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/preview.mjs"
+  }
+}
