@@ -46,3 +46,8 @@ Comparisons retrieve once, generate twice using the same snapshot, and save both
 | runs | Exact prompt/output, retrieval snapshot, model, settings and feedback |
 
 Deleting an analysis cascades to its runs, documents, chunks and query cache. Replacing an index after model/settings changes is atomic; a failed refresh preserves the old index and stops generation. Old supporting documents are ignored by new retrieval. Historical runs are preserved with their exact snapshots. Old offline runs remain readable but no new API run may use offline mode or disable RAG.
+
+
+## Separate evidence view and readable outputs
+
+The sidebar's RAG & chunks view follows Prompt studio. It contains stored chunk inspection, retrieval settings and previews, and the selected run's evidence snapshot. Prompt studio retains its editor/output layout. Stored chunk reads are scoped to one analysis and exclude vector values and legacy supporting documents; reading them causes no provider request. `app/static/output.js` formats valid JSON responses as labelled text/bullets for single, comparison and history outputs, while preserving the exact response in storage and exports. Display uses textContent, so source text and output cannot insert executable HTML.

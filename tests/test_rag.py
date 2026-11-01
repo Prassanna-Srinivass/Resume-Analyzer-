@@ -519,3 +519,34 @@ def test_request_contract_upgrade_rebuilds_both_caches(
     again = client.post(f"/api/analysis/{aid}/retrieve", json={}).json()
     assert again["query_cached"] and len(fake_embeddings) == 4
     assert len(rag.documents(aid)) == 1
+
+
+def test_stored_chunk_inspection_scoped_read_only(client, fake_embeddings, monkeypatch):
+    a = make_analysis(client, "SQL resume A")
+    b = make_analysis(client, "Python resume B")
+    with db.connect() as conn:
+        did = conn.execute(
+            "INSERT INTO rag_documents(analysis_id,filename,kind,fingerprint,embedding_model,dimensions,chunk_count) VALUES (?,'old support','supporting','legacy','gemini-embedding-001',768,1)",
+            (a["id"],),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO rag_chunks(document_id,position,text,embedding) VALUES (?,1,?,?)",
+            (did, "Hidden legacy supporting text", json.dumps(vector())),
+        )
+    monkeypatch.setattr(
+        rag, "embed", lambda *a: pytest.fail("Viewing chunks must not call Gemini")
+    )
+    result = client.get(f"/api/analysis/{a['id']}/chunks")
+    assert result.status_code == 200
+    chunks = result.json()
+    assert len(chunks) == 1 and chunks[0]["text"] == "SQL resume A"
+    assert chunks[0]["characters"] == len("SQL resume A")
+    assert chunks[0]["source_id"] == f"D{chunks[0]['document_id']}-C1"
+    assert "embedding" not in chunks[0]
+    assert client.get("/api/analysis/999/chunks").status_code == 404
+    client.delete(f"/api/analysis/{a['id']}")
+    assert client.get(f"/api/analysis/{a['id']}/chunks").status_code == 404
+    assert (
+        client.get(f"/api/analysis/{b['id']}/chunks").json()[0]["text"]
+        == "Python resume B"
+    )

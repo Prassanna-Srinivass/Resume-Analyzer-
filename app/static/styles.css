@@ -1270,3 +1270,9 @@ dialog::backdrop {
 .rag-warning { color:#9b3a1b; font-weight:600; }
 .rag-section details, #run-evidence details { margin-top:16px; }
 @media(max-width:650px) { .rag-section .section-top, .rag-document { align-items:flex-start; flex-direction:column; } }
+
+/* Dedicated resume evidence view. Prompt studio keeps its editor/output layout. */
+.stored-chunk { border-bottom: 1px solid var(--line); padding: 14px 0; }
+.stored-chunk summary { cursor: pointer; color: #294c58; font-weight: 600; }
+.chunk-text { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; line-height: 1.7; font-size: 13px; background: #f8faf9; padding: 16px; border-radius: 8px; max-height: 400px; overflow: auto; }
+#rag-chunks { max-height: 650px; overflow: auto; }

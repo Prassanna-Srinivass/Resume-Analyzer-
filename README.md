@@ -7,8 +7,8 @@ ResumeLab is a Python/FastAPI application for comparing a resume with a job desc
 1. Upload a PDF, DOCX or UTF-8 TXT resume (up to 5 MB), or paste text. Add a job description and optionally a target role.
 2. **Analyze resume** splits the resume into overlapping passages, obtains Gemini embeddings and saves the resume, report, passages and vectors in SQLite. If embedding fails, no incomplete analysis is saved.
 3. Review the dictionary-based skill coverage, matched excerpts and lexical similarity.
-4. Open **Prompt studio**. Relevant resume passages are retrieved automatically before preview, run and comparison. You can adjust the evidence question and passage count; RAG cannot be disabled.
-5. Gemini generates from the retrieved passages with source IDs. Review the cited evidence, save prompt revisions, compare two versions, and rate the output.
+4. Open **Prompt studio**. Relevant resume passages are retrieved automatically before preview, run and comparison. Open the separate **RAG & chunks** page below Prompt studio to inspect stored passages or adjust the evidence question and passage count; RAG cannot be disabled.
+5. Gemini generates from the retrieved passages with source IDs. Analysis output presents valid JSON responses as readable headings and bullet lists; ordinary text stays unchanged. Review the cited evidence on RAG & chunks, save prompt revisions, compare two versions, and rate the output.
 6. **Analysis history** restores inputs, prompts, outputs, citations and feedback. Export JSON or delete an analysis and its associated stored data.
 
 Supporting documents previously supplied extra portfolio or project evidence. That feature has been removed: the saved resume is now the only candidate evidence used in new runs. Existing historical snapshots remain readable.
@@ -143,3 +143,12 @@ The app previously nested `taskType` and `outputDimensionality` inside `embedCon
 Pull the latest code, restart the server and rerun `scripts/check_embeddings.py`. Expected diagnostic: `ok: true`, `dimensions: 768`. Do not delete your database or change the generation model. Index version 2 automatically refreshes old resume embeddings before retrieval and uses a separate fingerprint for new query vectors. Existing saved histories are preserved. The fix is covered by a simulated provider that returns 3072 dimensions when the request-level size field is absent; live confirmation requires your configured API key.
 
 Request serialization reference: [Google Python SDK, Developer API embedding converter](https://github.com/googleapis/python-genai/blob/main/google/genai/models.py).
+
+
+## Prompt studio and the RAG page
+
+Prompt studio contains the prompt editor, Analysis output, comparison and feedback, with no separate RAG card or chunk panels. The sidebar order is Resume analysis, Prompt studio, **RAG & chunks**, Analysis history. The RAG page displays every stored chunk for the current analysis, source IDs, character counts and index metadata. Open a different saved analysis from History to inspect that resume. Viewing stored chunks is a local read and does not call Gemini; previewing retrieval may use a query-embedding request.
+
+Evidence questions, passage counts, retrieved evidence previews and the selected result's evidence snapshot now live on RAG & chunks. Automatic retrieval still runs for all previews and generations. The read-only `GET /api/analysis/{id}/chunks` endpoint returns only the selected analysis's resume passages, never vectors or old supporting documents.
+
+The output formatter supports JSON objects, arrays and JSON code fences, presenting their values as labelled text and bullets. It does not alter saved outputs, prompt versions, citations or JSON exports. Exact original model responses remain accessible in History's details. Malformed JSON and ordinary prose stay verbatim. JavaScript formatter checks can be run with `node --test tests/test_output.cjs` (Node is not needed to run the Python app).

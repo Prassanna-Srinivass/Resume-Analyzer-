@@ -376,6 +376,13 @@ def list_documents(aid: int):
     return rag.documents(aid)
 
 
+@app.get("/api/analysis/{aid}/chunks")
+def list_resume_chunks(aid: int):
+    get_analysis(aid)
+    # Reading stored chunks never calls Gemini or exposes vector arrays.
+    return rag.stored_chunks(aid)
+
+
 @app.post("/api/analysis/{aid}/documents")
 def add_document(aid: int):
     get_analysis(aid)

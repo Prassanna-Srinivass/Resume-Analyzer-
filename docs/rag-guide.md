@@ -8,7 +8,7 @@ Set GEMINI_API_KEY, GEMINI_MODEL=gemini-3.5-flash-lite and GEMINI_EMBEDDING_MODE
 
 ## Data Analyst example
 
-Paste a resume stating: “Built Power BI sales dashboards. Used SQL joins to validate monthly sales totals. Cleaned CSV data using Python and pandas.” Paste a job description requiring SQL, Power BI, Python and stakeholder reporting. Analyze the resume to store its embeddings. In Prompt studio, enter “What resume evidence demonstrates SQL validation and dashboard development?” as the evidence question, preview the retrieved passages, then run Job Skill Matcher.
+Paste a resume stating: “Built Power BI sales dashboards. Used SQL joins to validate monthly sales totals. Cleaned CSV data using Python and pandas.” Paste a job description requiring SQL, Power BI, Python and stakeholder reporting. Analyze the resume to store its embeddings. On the RAG & chunks page below Prompt studio, enter “What resume evidence demonstrates SQL validation and dashboard development?” as the evidence question, preview the retrieved passages, then return to Prompt studio and run Job Skill Matcher.
 
 A grounded response can cite the SQL and dashboard passages. It must not invent stakeholder presentations, quantified savings, employers or years of experience. Exact wording and citation IDs depend on the saved resume and live provider response; this example is not a recorded Gemini result. Refine Instructions to request a table of requirement, evidence, source ID and uncertainty, save a new version, then compare versions using identical retrieved evidence.
 

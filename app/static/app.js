@@ -80,10 +80,11 @@ function showView(view) {
     $('page-name').textContent = {
         analyzer: 'Resume analysis',
         studio: 'Prompt studio',
+        rag: 'RAG & chunks',
         history: 'Analysis history'
     } [view];
     if (view === 'history') return loadHistory();
-    if (view === 'studio') return loadDocuments();
+    if (view === 'rag') return loadDocuments();
 }
 for (const b of document.querySelectorAll('.nav')) b.addEventListener('click', () => action(() => showView(b.dataset.view)));
 
@@ -144,6 +145,7 @@ function renderReport() {
 function clearRun() {
     state.run = null;
     $('run-evidence').replaceChildren();
+    $('run-evidence-section').hidden = true;
     $('feedback-panel').hidden = true;
     $('single-output').textContent = 'Choose a template and run it against this resume.';
     $('single-output').classList.add('empty-output');
@@ -248,7 +250,9 @@ bind('preview-prompt', async () => {
 function showRun(run) {
     state.run = run;
     renderEvidence($('run-evidence'), run.retrieval_snapshot);
-    $('single-output').textContent = run.output_text;
+    $('run-evidence-section').hidden = !run.retrieval_snapshot;
+    $('run-evidence-meta').textContent = `Run #${run.id} · ${run.prompt_name} · ${date(run.created_at)}`;
+    $('single-output').textContent = ResumeOutput.format(run.output_text);
     $('single-output').classList.remove('empty-output');
     $('output-mode').textContent = run.mode === 'demo' ? 'Offline demo · not AI' : 'Live AI';
     $('run-meta').textContent = `Run #${run.id} · ${run.model_name} · ${date(run.created_at)} · ${run.prompt_name}`;
@@ -302,7 +306,7 @@ bind('compare', async () => {
                 block: 'center'
             });
         });
-        box.append(d, node('pre', run.output_text, 'output'), evaluate);
+        box.append(d, node('pre', ResumeOutput.format(run.output_text), 'output'), evaluate);
         return box;
     }));
     renderEvidence($('retrieved-evidence'), result.runs[0].retrieval_snapshot);
@@ -389,9 +393,9 @@ async function loadRuns() {
     $('history-context').textContent = `Analysis #${state.analysis.id} · ${state.analysis.target_role||'Untitled role'} · ${state.runs.length} prompt runs`;
     for (const run of state.runs) {
         const box = node('article', undefined, 'history-run');
-        box.append(node('h3', `#${run.id} · ${run.prompt_name}`), node('p', `${run.model_name} · ${date(run.created_at)}`), node('pre', run.output_text, 'output'));
+        box.append(node('h3', `#${run.id} · ${run.prompt_name}`), node('p', `${run.model_name} · ${date(run.created_at)}`), node('pre', ResumeOutput.format(run.output_text), 'output'));
         const details = node('details');
-        details.append(node('summary', 'Exact prompt and saved evaluation'), node('pre', run.rendered_prompt + '\n\nRETRIEVAL SNAPSHOT\n' + JSON.stringify(run.retrieval_snapshot, null, 2) + '\n\nEVALUATION\n' + (run.feedback ? JSON.stringify(run.feedback, null, 2) : 'Not rated yet')));
+        details.append(node('summary', 'Exact prompt and saved evaluation'), node('pre', run.rendered_prompt + '\n\nORIGINAL MODEL RESPONSE\n' + run.output_text + '\n\nRETRIEVAL SNAPSHOT\n' + JSON.stringify(run.retrieval_snapshot, null, 2) + '\n\nEVALUATION\n' + (run.feedback ? JSON.stringify(run.feedback, null, 2) : 'Not rated yet')));
         box.append(details);
         const reuse = node('button', 'Reuse prompt & review output', 'button secondary');
         reuse.addEventListener('click', () => action(async () => {
@@ -464,16 +468,35 @@ function renderEvidence(container, snapshot) {
 }
 async function loadDocuments() {
     $('rag-documents').replaceChildren();
+    $('rag-chunks').replaceChildren();
     if (!state.analysis) {
+        $('rag-context').textContent = 'Analyze a resume, or open a saved analysis from Analysis history.';
+        $('chunk-count').textContent = 'No resume selected';
         $('rag-documents').append(node('p', 'Analyze a resume first to create its evidence collection.', 'helper'));
+        $('rag-chunks').append(node('p', 'Your saved resume chunks will appear here.', 'helper'));
         return;
     }
-    const docs = await api(`/api/analysis/${state.analysis.id}/documents`);
-    $('rag-documents').append(node('p', docs.length ? `Analysis #${state.analysis.id} · Resume index ready` : 'Older analysis: the resume will be indexed automatically on the next retrieval.', 'helper'));
+    const aid = state.analysis.id;
+    const [docs, chunks] = await Promise.all([
+        api(`/api/analysis/${aid}/documents`),
+        api(`/api/analysis/${aid}/chunks`)
+    ]);
+    const changed = Object.entries(inputValues()).some(([k,v]) => state.analysis[k] !== v);
+    $('rag-context').textContent = `Analysis #${aid} · ${state.analysis.target_role || 'Untitled role'}${changed ? ' · Inputs have changed; analyze again to index them.' : ''}`;
+    $('chunk-count').textContent = `${chunks.length} stored chunks`;
+    $('rag-documents').append(node('p', docs.length ? `Analysis #${aid} · Resume index ready` : 'Older analysis: the resume will be indexed automatically on the next retrieval.', 'helper'));
     for (const doc of docs) {
-        $('rag-documents').append(node('p', `${doc.filename} · ${doc.chunk_count} chunks · ${doc.embedding_model}`, 'helper'));
+        $('rag-documents').append(node('p', `${doc.filename} · ${doc.chunk_count} chunks · ${doc.embedding_model} · ${doc.dimensions} dimensions`, 'helper'));
     }
+    for (const chunk of chunks) {
+        const item = node('details', undefined, 'stored-chunk');
+        item.open = chunks.length === 1;
+        item.append(node('summary', `[${chunk.source_id}] Chunk ${chunk.position} · ${chunk.characters} characters`), node('pre', chunk.text, 'chunk-text'));
+        $('rag-chunks').append(item);
+    }
+    if (!chunks.length) $('rag-chunks').append(node('p', 'No stored chunks yet. They will be created automatically on the next retrieval.', 'helper'));
 }
+bind('refresh-rag', loadDocuments);
 bind('retrieve-evidence', async () => {
     const a = await ensureAnalysis();
     const snapshot = await post(`/api/analysis/${a.id}/retrieve`, ragOptions());
