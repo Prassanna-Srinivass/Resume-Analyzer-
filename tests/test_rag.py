@@ -415,3 +415,47 @@ def test_literal_source_text_is_not_recursively_substituted(client, fake_embeddi
     ).json()
     assert "{{target_role}}" in result["rendered_prompt"]
     assert "untrusted DATA" in result["rendered_prompt"]
+
+
+@pytest.mark.parametrize(
+    "body,detail",
+    [
+        (
+            {"embeddings": [{"values": [1.0] * 3072}]},
+            "Expected 768 dimensions, received 3072",
+        ),
+        ({}, "missing the embeddings array"),
+        ({"embeddings": []}, "expected 1 vectors, received 0"),
+        ({"embeddings": [None]}, "item must be an object"),
+        ({"embeddings": [{"values": ["private"] * 768}]}, "Invalid vector values"),
+    ],
+)
+def test_embedding_diagnostic_validation(monkeypatch, body, detail):
+    monkeypatch.setenv("GEMINI_API_KEY", "private-key")
+    monkeypatch.setattr(
+        httpx.Client, "post", lambda *a, **kw: httpx.Response(200, json=body)
+    )
+    with pytest.raises(llm.LLMError) as err:
+        rag.embed(["private resume"], "RETRIEVAL_DOCUMENT", rag.settings())
+    assert detail in str(err.value)
+    assert "private" not in str(err.value)
+
+
+def test_embedding_network_and_non_json_are_distinct(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "private-key")
+
+    def fail(*a, **kw):
+        raise httpx.ConnectError("private proxy credentials")
+
+    monkeypatch.setattr(httpx.Client, "post", fail)
+    with pytest.raises(llm.LLMError, match="ConnectError") as err:
+        rag.embed(["private resume"], "RETRIEVAL_DOCUMENT", rag.settings())
+    assert "private" not in str(err.value)
+    monkeypatch.setattr(
+        httpx.Client,
+        "post",
+        lambda *a, **kw: httpx.Response(200, text="<html>private proxy details</html>"),
+    )
+    with pytest.raises(llm.LLMError, match="not valid JSON") as err:
+        rag.embed(["private resume"], "RETRIEVAL_DOCUMENT", rag.settings())
+    assert "private" not in str(err.value)

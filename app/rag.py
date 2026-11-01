@@ -46,8 +46,10 @@ def settings():
 
 
 def normalize(values):
-    if not isinstance(values, list) or len(values) != DIMENSIONS:
-        raise ValueError("Invalid vector dimensions")
+    if not isinstance(values, list):
+        raise ValueError("Embedding values must be an array")
+    if len(values) != DIMENSIONS:
+        raise ValueError(f"Expected {DIMENSIONS} dimensions, received {len(values)}")
     if any(
         isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x)
         for x in values
@@ -93,28 +95,58 @@ def embed(texts, task_type, config):
                         429,
                     )
                 if response.is_error:
+                    reason = {
+                        400: "request rejected; check embedding model/request compatibility",
+                        401: "API key authentication failed",
+                        403: "access denied; check API key restrictions and model access",
+                        404: "embedding model or endpoint unavailable to this project",
+                    }.get(response.status_code, "provider request failed; retry later")
                     raise LLMError(
-                        "Gemini embedding request failed. Check API key, embedding model access and quota."
+                        f"Gemini embedding HTTP {response.status_code}: {reason}. No partial index was saved."
                     )
-                items = response.json()["embeddings"]
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    raise LLMError(
+                        f"Gemini embedding response was not valid JSON (HTTP {response.status_code}). "
+                        "A proxy or network filter may have replaced the response. No partial index was saved."
+                    ) from exc
+                items = payload.get("embeddings") if isinstance(payload, dict) else None
+                if not isinstance(items, list):
+                    raise LLMError(
+                        "Gemini returned invalid embeddings: response is missing the embeddings array. No partial index was saved."
+                    )
                 if len(items) != len(batch):
-                    raise ValueError("Embedding count mismatch")
-                vectors.extend(normalize(item["values"]) for item in items)
+                    raise LLMError(
+                        f"Gemini returned invalid embeddings: expected {len(batch)} vectors, received {len(items)}. No partial index was saved."
+                    )
+                for item in items:
+                    if not isinstance(item, dict):
+                        raise LLMError(
+                            "Gemini returned invalid embeddings: embedding item must be an object. No partial index was saved."
+                        )
+                    try:
+                        vectors.append(normalize(item.get("values")))
+                    except (ValueError, TypeError, OverflowError) as exc:
+                        # Only our controlled validation messages are exposed.
+                        detail = (
+                            str(exc)
+                            if isinstance(exc, ValueError)
+                            else "Invalid numeric values"
+                        )
+                        raise LLMError(
+                            f"Gemini returned invalid embeddings: {detail}. No partial index was saved."
+                        ) from exc
     except httpx.TimeoutException as exc:
         raise LLMError(
             "Gemini embedding request timed out. Retry; no partial index was saved.",
             504,
         ) from exc
-    except (
-        httpx.HTTPError,
-        ValueError,
-        KeyError,
-        TypeError,
-        AttributeError,
-        OverflowError,
-    ) as exc:
+    except httpx.HTTPError as exc:
+        # Do not disclose exception text, proxy URLs, response bodies or headers.
         raise LLMError(
-            "Gemini returned unavailable or invalid embeddings. No partial index was saved."
+            f"Cannot reach Gemini embedding service ({type(exc).__name__}). "
+            "Check internet connectivity, proxy/VPN settings and HTTPS certificates. No partial index was saved."
         ) from exc
     return vectors
 

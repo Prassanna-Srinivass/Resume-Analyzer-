@@ -124,3 +124,13 @@ SQLite stores resumes, vectors, query caches, exact prompts, outputs and feedbac
 This is a single-user local application. For public hosting, authentication, per-user data separation, HTTPS, request limits and persistent disk storage still need deployment work. GitHub stores source and does not automatically run the backend. Scanned PDFs require OCR outside this app; encrypted PDFs and legacy `.doc` files are rejected.
 
 Provider references: [API key](https://aistudio.google.com/apikey), [embeddings API](https://ai.google.dev/api/embeddings), [Gemini 3.5 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite).
+
+## Diagnose an embedding failure
+
+The old message “Gemini returned unavailable or invalid embeddings” combined connection, JSON and vector-validation failures. Update the code to see a specific error. From the project folder, run:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/check_embeddings.py
+```
+
+This sends one synthetic text passage with the same embedding settings as the application. It does not send your resume, print your key, or write to the database. It uses API quota. Output distinguishes network failures, invalid JSON, missing vectors and unexpected dimensions. Share only this diagnostic output when requesting help, never `.env` or raw request headers. A successful result shows `ok: true` and `dimensions: 768`. A dimension mismatch must be investigated rather than silently mixing incompatible vectors. “No partial index was saved” means the failed operation did not commit an incomplete resume index; it does not say existing analyses were erased.
