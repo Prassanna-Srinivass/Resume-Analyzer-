@@ -417,7 +417,7 @@ bind('export-runs', async () => {
 
 function updateMode() {
     const live = $('mode').value === 'live';
-    $('mode-banner').replaceChildren(node('span', undefined, 'status-dot'), node('span', live ? `Live AI · ${state.live?'Configured':'API key not configured'} · Sends resume, job description and prompt to OpenAI. Each run may incur API charges.` : 'Offline demo · Real file parsing and skill matching. Reports use fixed rules, not an AI model; prompt edits do not change demo output.'));
+    $('mode-banner').replaceChildren(node('span', undefined, 'status-dot'), node('span', live ? `Live AI · ${state.live?'Configured':'API key not configured'} · Sends resume, job description and prompt to Google Gemini. Each run may incur API charges.` : 'Offline demo · Real file parsing and skill matching. Reports use fixed rules, not an AI model; prompt edits do not change demo output.'));
 }
 $('mode').addEventListener('change', updateMode);
 action(async () => {

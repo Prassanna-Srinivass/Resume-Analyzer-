@@ -9,7 +9,7 @@ The supplied documents describe an enhancement, but the requested repository was
 3. `prompts.py` owns six template seeds; `db.initialize` seeds them once.
 4. SQLite stores template identity and immutable versions. A serialized transaction allocates the next version number.
 5. The preview/run endpoints replace validated placeholders once, with the saved analysis values.
-6. `llm.generate` either runs an explicit deterministic demo or calls OpenAI from the backend. There is no silent mode fallback.
+6. `llm.generate` either runs an explicit deterministic demo or calls Google Gemini from the backend. There is no silent mode fallback.
 7. A run snapshots the base version ID, exact instructions (including unsaved edits), filled prompt, mode, model/configuration, output and analysis reference.
 8. Comparison uses two saved versions of one template, one immutable analysis and one captured model configuration. Both successful outputs are stored in one transaction. If either call fails, neither run is stored; the first provider call can still have incurred a charge.
 9. The UI renders output using textContent. Manual feedback attaches to the run. Deleting an analysis cascades to its runs; templates and versions remain reusable.
@@ -33,6 +33,6 @@ The plain JavaScript UI is served by FastAPI on the same origin. Its views are R
 | Same-input comparison | Same analysis/model/settings; both prompt texts and outputs shown |
 | Manual evaluation | Four 1–5 ratings and feedback note |
 | Analysis history | Restore, reuse, export, delete |
-| Existing LLM integration | None existed; one OpenAI adapter supplied |
+| Existing LLM integration | None existed; one Google Gemini adapter supplied |
 | Existing semantic/RAG components | None existed; explicitly documented future work |
 | Docker / CI/CD | Not added |

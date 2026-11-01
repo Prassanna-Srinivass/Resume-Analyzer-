@@ -242,13 +242,13 @@ def test_live_missing_key_is_clear_no_demo_fallback(client):
         f"/api/analysis/{a['id']}/run-prompt",
         json={"prompt_version_id": 1, "mode": "live"},
     )
-    assert response.status_code == 503 and "OPENAI_API_KEY" in response.json()["detail"]
+    assert response.status_code == 503 and "GEMINI_API_KEY" in response.json()["detail"]
     assert client.get(f"/api/analysis/{a['id']}/prompt-runs").json() == []
 
 
 @pytest.mark.parametrize("status,expected", [(429, 429), (401, 502), (500, 502)])
 def test_provider_failures_sanitize_response(monkeypatch, status, expected):
-    monkeypatch.setenv("OPENAI_API_KEY", "test-secret-never-log")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-secret-never-log")
 
     def fake_post(*args, **kwargs):
         return httpx.Response(status, json={"error": "sensitive provider payload"})
@@ -263,7 +263,7 @@ def test_provider_failures_sanitize_response(monkeypatch, status, expected):
 
 
 def test_timeout_and_live_success(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
 
     def timeout(*args, **kwargs):
         raise httpx.ReadTimeout("internal")
@@ -274,15 +274,24 @@ def test_timeout_and_live_success(monkeypatch):
     assert result.value.status == 504
 
     def success(self, url, **kwargs):
-        assert kwargs["json"]["messages"][1]["content"] == "exact rendered prompt"
-        assert kwargs["headers"]["Authorization"] == "Bearer test-key"
+        assert (
+            url
+            == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
+        )
+        assert (
+            kwargs["json"]["contents"][0]["parts"][0]["text"] == "exact rendered prompt"
+        )
+        assert kwargs["headers"]["x-goog-api-key"] == "test-key"
+        assert "temperature" not in kwargs["json"]["generationConfig"]
+        assert kwargs["json"]["generationConfig"]["maxOutputTokens"] == 4096
+        assert "test-key" not in url
         return httpx.Response(
             200,
             json={
-                "choices": [
+                "candidates": [
                     {
-                        "message": {"content": "Evidence grounded response"},
-                        "finish_reason": "stop",
+                        "content": {"parts": [{"text": "Evidence grounded response"}]},
+                        "finishReason": "STOP",
                     }
                 ]
             },
@@ -367,3 +376,59 @@ def test_static_shell_and_privacy_headers(client):
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
     assert client.get("/api/health").headers["cache-control"] == "no-store"
     assert client.get("/.env").status_code == 404
+
+
+@pytest.mark.parametrize(
+    "payload,status",
+    [
+        ({"promptFeedback": {"blockReason": "SAFETY"}}, 422),
+        ({"candidates": [{"finishReason": "SAFETY"}]}, 422),
+        ({"candidates": []}, 502),
+        ({"candidates": [{"finishReason": "STOP", "content": {"parts": []}}]}, 502),
+    ],
+)
+def test_gemini_blocked_and_empty_responses(monkeypatch, payload, status):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        httpx.Client, "post", lambda *a, **kw: httpx.Response(200, json=payload)
+    )
+    with pytest.raises(llm.LLMError) as result:
+        llm.generate("p", "summary", {}, "live", llm.model_config("live"))
+    assert result.value.status == status
+
+
+def test_gemini_model_configuration_and_truncation(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-test-model")
+    assert llm.model_config("live")["model"] == "gemini-test-model"
+
+    def response(*args, **kwargs):
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {
+                        "finishReason": "MAX_TOKENS",
+                        "content": {
+                            "parts": [
+                                {"text": "Internal thought", "thought": True},
+                                {"text": "Visible "},
+                                {"text": "response"},
+                            ]
+                        },
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx.Client, "post", response)
+    output = llm.generate("p", "summary", {}, "live", llm.model_config("live"))
+    assert (
+        output.startswith("Visible response")
+        and "Internal thought" not in output
+        and "truncated" in output
+    )
+    monkeypatch.setenv("GEMINI_MODEL", "../invalid/model")
+    with pytest.raises(llm.LLMError) as result:
+        llm.generate("p", "summary", {}, "live", llm.model_config("live"))
+    assert result.value.status == 503

@@ -6,7 +6,7 @@ Built from the supplied **Resume_Analyser_Prompt_Engineering_Updated_README.md**
 
 [Open the read-only sample output](docs/sample-output.html)
 
-The screenshot is a **read-only rendering of actual backend output** using fictional sample inputs in offline demo mode. It is not a screenshot of a live OpenAI response. The complete export is in [docs/sample-output.html](docs/sample-output.html); download it and open it in a browser. [Raw sample results](docs/sample-output.json) and [verification details](docs/verification.md) are included.
+The screenshot is a **read-only rendering of actual backend output** using fictional sample inputs in offline demo mode. It is not a screenshot of a live Google Gemini response. The complete export is in [docs/sample-output.html](docs/sample-output.html); download it and open it in a browser. [Raw sample results](docs/sample-output.json) and [verification details](docs/verification.md) are included.
 
 ## What works
 
@@ -19,7 +19,7 @@ The screenshot is a **read-only rendering of actual backend output** using ficti
 - Compare two versions of one template using the **same saved inputs and model settings**.
 - Rate relevance, accuracy, coverage, and clarity (1–5), and add feedback.
 - Reopen history, reuse prompts, export analysis/runs as JSON, and delete an analysis with its associated runs.
-- Switch between a **clearly labelled offline demo** and server-side **OpenAI live generation**.
+- Switch between a **clearly labelled offline demo** and server-side **Google Gemini live generation**.
 
 ## Quick start on Windows
 
@@ -55,20 +55,20 @@ cp .env.example .env
 .venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-## Enable live AI
+## Enable Gemini 3.5 Flash-Lite
 
 Create **`.env` in the project root**, alongside `requirements.txt` and `.env.example`:
 
 ```dotenv
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-4o-mini
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-3.5-flash-lite
 DATABASE_PATH=data/resume_analyzer.db
 ```
 
-Restart the server, then select **Live AI · OpenAI** in the upper-right Generation menu. The default model uses the Chat Completions API with `temperature=0.2` and `max_tokens=1800`. If changing the model, use one that supports those parameters and is available to your API project. Model availability is controlled by your provider account.
+Restart the server, then select **Live AI · Google Gemini** in the upper-right Generation menu. The default model uses the Gemini `generateContent` REST API with `maxOutputTokens=4096`. Deprecated sampling parameters are omitted, so the model uses its defaults. If changing the model, use a compatible text-generation model available to your Google API project. Model availability is controlled by your provider account.
 
 - Credentials stay in the backend. `.env`, databases, uploads, and virtual environments are excluded from Git.
-- Live mode sends resume/job content and the prompt to OpenAI. Each run can incur API charges; comparison sends two requests.
+- Live mode sends resume/job content and the prompt to Google Gemini. Each run can incur API charges; comparison sends two requests.
 - Missing credentials, rejected credentials, rate limits, network problems, and timeouts produce clear errors. **Live failures never silently return demo output.**
 - No real provider call was performed during delivery because no API key was available. Provider success/failure behavior was tested with mocked HTTP responses.
 - Offline generation is deterministic and **does not interpret edited instructions**. Use it to explore the workflow, not to judge prompt quality. Identical demo outputs between versions are expected.
@@ -106,7 +106,7 @@ app/
   main.py             FastAPI routes, validation, comparisons, feedback
   analysis.py         File extraction, skill dictionary and lexical baseline
   prompts.py          Six seed templates and safe placeholder replacement
-  llm.py              OpenAI adapter and explicit offline demo
+  llm.py              Google Gemini adapter and explicit offline demo
   db.py               SQLite schema, transactions and seed records
   static/             HTML, CSS, JavaScript application
 examples/             Fictional resume and job description
@@ -158,3 +158,5 @@ SQLite defaults to `data/resume_analyzer.db`, relative to the working directory.
 This is a **single-user local application**, with no login or tenant isolation, as requested by the project plan. Bind to `127.0.0.1` for local use. Before exposing it publicly, add authentication, per-user data separation, upload/request limits at the web server, HTTPS, and appropriate retention controls. GitHub stores the source; it does not automatically host this Python backend. No public deployment was created.
 
 Password-protected, image-only/scanned, unreadable, oversized PDFs, and legacy `.doc` files are not supported. OCR, semantic embeddings, RAG, multi-provider support, and batch candidate ranking remain future work rather than claimed functionality.
+
+Model and REST references: [Gemini 3.5 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite), [generateContent API](https://ai.google.dev/api/generate-content).

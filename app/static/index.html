@@ -11,7 +11,7 @@
 <div class="sidebar-footer"><span class="status-dot"></span> Local workspace <span class="version">v1.0</span></div>
 </aside>
 <main>
-<header class="topbar"><div><span class="breadcrumb">Workspace</span><span class="slash">/</span><span id="page-name">Resume analysis</span></div><div class="mode-control"><label for="mode">Generation</label><select id="mode"><option value="demo">Offline demo</option><option value="live">Live AI · OpenAI</option></select><span class="avatar">RL</span></div></header>
+<header class="topbar"><div><span class="breadcrumb">Workspace</span><span class="slash">/</span><span id="page-name">Resume analysis</span></div><div class="mode-control"><label for="mode">Generation</label><select id="mode"><option value="demo">Offline demo</option><option value="live">Live AI · Google Gemini</option></select><span class="avatar">RL</span></div></header>
 <div class="page-content">
 <div id="notice" role="status" aria-live="polite" hidden></div>
 <div class="mode-banner" id="mode-banner"><span class="status-dot"></span><span><strong>Offline demo</strong> · Real file parsing and skill matching. Generated reports use fixed rules, not an AI model.</span></div>
@@ -23,7 +23,7 @@
 <label class="field-label" for="resume-text">Resume text <span>or paste below</span></label><textarea id="resume-text" maxlength="50000" rows="6" placeholder="Paste your experience, projects, education, and skills…"></textarea>
 <label class="field-label" for="target-role">Target role <span>optional</span></label><input id="target-role" maxlength="200" placeholder="e.g. Python Backend Developer">
 <label class="field-label" for="job-description">Job description</label><textarea id="job-description" maxlength="20000" rows="5" placeholder="Paste the role’s responsibilities and required skills…"></textarea>
-<button id="analyze" class="button primary full">Analyze resume <span>→</span></button><p class="privacy-note">Saved in this app’s SQLite database. Live AI sends the supplied text to OpenAI.</p>
+<button id="analyze" class="button primary full">Analyze resume <span>→</span></button><p class="privacy-note">Saved in this app’s SQLite database. Live AI sends the supplied text to Google Gemini.</p>
 </section>
 <div class="results-column"><section class="card overview"><div class="section-top"><div><div class="eyebrow">THE BIG PICTURE</div><h2>Match overview</h2></div><span class="pill neutral" id="analysis-state">Ready when you are</span></div>
 <div id="empty-report" class="empty-state"><span class="empty-symbol">◎</span><h3>See how your experience connects.</h3><p>Upload a resume and add a job description, or try the sample to explore.</p><div class="empty-tags"><span>Skills</span><span>Evidence</span><span>Opportunities</span></div></div>

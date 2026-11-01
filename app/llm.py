@@ -1,7 +1,8 @@
-"""Server-side OpenAI integration. Demo output is explicitly non-generative."""
+"""Server-side Google Gemini integration. Demo output is explicitly non-generative."""
 
 import json
 import os
+import re
 import httpx
 from .prompts import GUARD
 
@@ -15,7 +16,10 @@ class LLMError(Exception):
 def model_config(mode):
     if mode == "demo":
         return {"model": "offline-evidence-demo-v1", "temperature": None}
-    return {"model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"), "temperature": 0.2}
+    return {
+        "model": os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip(),
+        "max_output_tokens": 4096,
+    }
 
 
 def demo_output(task, analysis):
@@ -74,56 +78,85 @@ def demo_output(task, analysis):
 
 
 def generate(prompt, task, analysis, mode, config):
+    """Generate server-side through Gemini; never fall back to a demo on failure."""
     if mode == "demo":
         return demo_output(task, analysis)
-    key = os.getenv("OPENAI_API_KEY", "").strip()
+    key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         raise LLMError(
-            "Live AI is not configured. Add OPENAI_API_KEY to the backend .env file and restart, or choose Offline demo.",
+            "Live AI is not configured. Add GEMINI_API_KEY to the backend .env file and restart, or choose Offline demo.",
+            503,
+        )
+    model = config["model"]
+    if not re.fullmatch(r"gemini-[A-Za-z0-9._-]+", model):
+        raise LLMError(
+            "GEMINI_MODEL must be a model ID such as gemini-3.5-flash-lite, without a URL or models/ prefix.",
             503,
         )
     try:
         with httpx.Client(timeout=httpx.Timeout(60, connect=10)) as client:
             response = client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {key}"},
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                headers={"x-goog-api-key": key},
                 json={
-                    "model": config["model"],
-                    "temperature": config["temperature"],
-                    "max_tokens": 1800,
-                    "messages": [
-                        {"role": "system", "content": GUARD},
-                        {"role": "user", "content": prompt},
-                    ],
+                    "systemInstruction": {"parts": [{"text": GUARD}]},
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "maxOutputTokens": config.get("max_output_tokens", 4096)
+                    },
                 },
             )
         if response.status_code == 429:
             raise LLMError(
-                "The AI provider rate limit or quota was reached. Check your API billing or try again later.",
+                "Gemini rate limit or quota reached. Check your Google API billing/quota or retry later.",
                 429,
             )
-        if response.status_code in (401, 403):
+        if response.status_code in (400, 401, 403):
             raise LLMError(
-                "The AI provider rejected the server credentials. Check OPENAI_API_KEY and model access.",
-                502,
+                "Gemini rejected the request. Check GEMINI_API_KEY, GEMINI_MODEL, and access for your Google API project."
+            )
+        if response.status_code == 404:
+            raise LLMError(
+                "The configured Gemini model was not found or is not available to this API project. Check GEMINI_MODEL."
             )
         if response.is_error:
-            raise LLMError(
-                "The AI provider could not complete the request. Check the configured model and retry."
-            )
+            raise LLMError("Gemini could not complete the request. Please retry later.")
         body = response.json()
-        choice = body["choices"][0]
-        output = choice["message"]["content"]
-        if not isinstance(output, str) or not output.strip():
+        if body.get("promptFeedback", {}).get("blockReason"):
+            raise LLMError(
+                "Gemini blocked this request. Review the supplied content and prompt before retrying.",
+                422,
+            )
+        candidate = body["candidates"][0]
+        finish = candidate.get("finishReason", "")
+        if finish not in ("STOP", "MAX_TOKENS"):
+            raise LLMError(
+                "Gemini could not return a complete response for this request. Review the prompt and retry.",
+                422,
+            )
+        parts = candidate.get("content", {}).get("parts", [])
+        output = "".join(
+            part["text"]
+            for part in parts
+            if isinstance(part.get("text"), str) and not part.get("thought")
+        ).strip()
+        if not output:
             raise ValueError("Empty response")
-        if choice.get("finish_reason") == "length":
-            output += "\n\n[Output truncated at the provider token limit. Narrow the prompt and rerun.]"
+        if finish == "MAX_TOKENS":
+            output += "\n\n[Output truncated at the Gemini token limit. Narrow the prompt and rerun.]"
         return output
     except httpx.TimeoutException as exc:
         raise LLMError(
-            "The AI request timed out after 60 seconds. Please retry.", 504
+            "The Gemini request timed out after 60 seconds. Please retry.", 504
         ) from exc
-    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+    except (
+        httpx.HTTPError,
+        ValueError,
+        KeyError,
+        IndexError,
+        TypeError,
+        AttributeError,
+    ) as exc:
         raise LLMError(
-            "The AI provider returned an unavailable or invalid response. Please retry."
+            "Gemini returned an unavailable or invalid response. Please retry."
         ) from exc

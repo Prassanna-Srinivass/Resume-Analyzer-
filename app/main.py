@@ -197,7 +197,7 @@ def save_run(conn, record, comparison_id=None):
 def health():
     return {
         "status": "ok",
-        "live_available": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+        "live_available": bool(os.getenv("GEMINI_API_KEY", "").strip()),
         "live_model": llm.model_config("live")["model"],
         "demo_model": llm.model_config("demo")["model"],
     }
