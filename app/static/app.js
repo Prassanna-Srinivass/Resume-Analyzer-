@@ -261,7 +261,7 @@ bind('run-prompt', async () => {
     const run = await post(`/api/analysis/${a.id}/run-prompt`, {
         prompt_version_id: Number($('version-select').value),
         prompt_text: $('prompt-editor').value,
-        mode: $('mode').value,
+        mode: 'live',
         ...ragOptions()
     });
     showRun(run);
@@ -285,7 +285,7 @@ bind('compare', async () => {
     const result = await post(`/api/analysis/${a.id}/compare`, {
         version_a: Number($('compare-a').value),
         version_b: Number($('compare-b').value),
-        mode: $('mode').value,
+        mode: 'live',
         ...ragOptions()
     });
     $('comparison-output').replaceChildren(...result.runs.map((run, i) => {
@@ -342,7 +342,6 @@ async function loadHistory() {
             clearRun();
             $('comparison-output').replaceChildren();
             renderReport();
-            $('rag-enabled').checked = false;
             $('retrieved-evidence').replaceChildren();
             await loadDocuments();
             await loadRuns();
@@ -404,10 +403,8 @@ async function loadRuns() {
                 $('prompt-editor').value = run.prompt_text;
                 $('draft-label').textContent = 'Exact prompt restored from run';
             }
-            $('rag-enabled').checked = !!run.retrieval_snapshot;
             $('rag-query').value = run.retrieval_snapshot?.query || '';
             $('rag-top-k').value = String(run.retrieval_snapshot?.top_k || 5);
-            $('mode').value = run.mode;
             updateMode();
             showRun(run);
             await showView('studio');
@@ -436,10 +433,8 @@ bind('export-runs', async () => {
 });
 
 function updateMode() {
-    const live = $('mode').value === 'live';
-    $('mode-banner').replaceChildren(node('span', undefined, 'status-dot'), node('span', live ? `Live AI · ${state.live?'Configured':'API key not configured'} · Sends resume, job description and prompt to Google Gemini. Each run may incur API charges.` : 'Offline demo · Real file parsing and skill matching. Reports use fixed rules, not an AI model; prompt edits do not change demo output.'));
+    $('mode-banner').replaceChildren(node('span', undefined, 'status-dot'), node('span', `Gemini + automatic RAG · ${state.live?'API key configured':'Set GEMINI_API_KEY in .env and restart'} · Resume embeddings are stored and reused. API charges may apply.`));
 }
-$('mode').addEventListener('change', updateMode);
 action(async () => {
     const health = await api('/api/health');
     state.live = health.live_available;
@@ -448,7 +443,7 @@ action(async () => {
 });
 
 function ragOptions() {
-    return {rag_enabled: $('rag-enabled').checked, rag_query: $('rag-query').value.trim(), top_k: Number($('rag-top-k').value)};
+    return {rag_query: $('rag-query').value.trim(), top_k: Number($('rag-top-k').value)};
 }
 function renderEvidence(container, snapshot) {
     container.replaceChildren();
@@ -456,7 +451,7 @@ function renderEvidence(container, snapshot) {
     const panel = node('details');
     panel.open = true;
     panel.append(node('summary', `Retrieved evidence · ${snapshot.sources.length} passages`));
-    panel.append(node('p', 'Full saved resume is also supplied as [RESUME]. Scores indicate similarity, not factual accuracy or candidate suitability.', 'helper'));
+    panel.append(node('p', 'Only the retrieved resume passages are supplied as candidate evidence. Retrieval can omit relevant details. Scores indicate similarity, not factual accuracy or candidate suitability.', 'helper'));
     for (const source of snapshot.sources) {
         const item = node('article', undefined, 'evidence-item');
         item.append(node('strong', `[${source.source_id}] ${source.filename} · ${source.page ? 'Page '+source.page : 'Chunk '+source.chunk}`), node('p', `Cosine similarity: ${source.similarity}`, 'helper'), node('pre', source.text));
@@ -474,49 +469,19 @@ async function loadDocuments() {
         return;
     }
     const docs = await api(`/api/analysis/${state.analysis.id}/documents`);
-    $('rag-documents').append(node('p', `Analysis #${state.analysis.id} · ${docs.length}/10 indexed documents`, 'helper'));
+    $('rag-documents').append(node('p', docs.length ? `Analysis #${state.analysis.id} · Resume index ready` : 'Older analysis: the resume will be indexed automatically on the next retrieval.', 'helper'));
     for (const doc of docs) {
-        const item = node('div', undefined, 'rag-document');
-        item.append(node('span', `${doc.filename} · ${doc.chunk_count} chunks · ${doc.embedding_model}`));
-        const remove = node('button', 'Remove from index', 'button ghost');
-        remove.addEventListener('click', () => action(async () => {
-            if (!confirm('Remove this document from future retrieval? Existing run snapshots retain previously used passages. Delete the analysis to remove those too.')) return;
-            await api(`/api/analysis/${state.analysis.id}/documents/${doc.id}`, {method:'DELETE'});
-            $('retrieved-evidence').replaceChildren();
-            await loadDocuments();
-        }));
-        item.append(remove); $('rag-documents').append(item);
+        $('rag-documents').append(node('p', `${doc.filename} · ${doc.chunk_count} chunks · ${doc.embedding_model}`, 'helper'));
     }
 }
-bind('refresh-documents', loadDocuments);
-bind('index-resume', async () => {
-    const a = await ensureAnalysis();
-    notify('Indexing the saved resume with Gemini embeddings…');
-    const result = await post(`/api/analysis/${a.id}/index-resume`, {});
-    await loadDocuments();
-    notify(result.cached ? 'This resume is already indexed; reused the existing index.' : 'Resume indexed. Add supporting documents or preview retrieved evidence.');
-});
-$('rag-file').addEventListener('change', () => action(async () => {
-    const file = $('rag-file').files[0];
-    if (!file) return;
-    try {
-        if (file.size > 5*1024*1024) throw new Error('Choose a file no larger than 5 MB.');
-        const a = await ensureAnalysis(), data = new FormData();
-        data.append('file', file);
-        notify('Extracting and indexing the document with Gemini embeddings…');
-        const result = await api(`/api/analysis/${a.id}/documents`, {method:'POST', body:data});
-        await loadDocuments();
-        $('retrieved-evidence').replaceChildren();
-        notify(result.cached ? 'Document already indexed; reused the existing index.' : 'Supporting document indexed for this analysis.');
-    } finally { $('rag-file').value = ''; }
-}));
 bind('retrieve-evidence', async () => {
     const a = await ensureAnalysis();
     const snapshot = await post(`/api/analysis/${a.id}/retrieve`, ragOptions());
     renderEvidence($('retrieved-evidence'), snapshot);
-    notify('Evidence retrieved. Enable Use RAG and select Live AI to use it in a prompt run. Each run retrieves again; comparisons share one snapshot.');
+    await loadDocuments();
+    notify('Resume evidence retrieved. Every prompt uses retrieval automatically; comparisons share one evidence snapshot.');
 });
-for (const id of ['rag-enabled','rag-query','rag-top-k']) $(id).addEventListener('change', () => {
+for (const id of ['rag-query','rag-top-k']) $(id).addEventListener('change', () => {
     $('preview-panel').hidden = true;
     $('retrieved-evidence').replaceChildren();
 });

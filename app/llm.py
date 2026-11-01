@@ -79,8 +79,10 @@ def demo_output(task, analysis):
 
 def generate(prompt, task, analysis, mode, config):
     """Generate server-side through Gemini; never fall back to a demo on failure."""
-    if mode == "demo":
-        return demo_output(task, analysis)
+    if mode != "live":
+        raise LLMError(
+            "All new runs require live Gemini generation with resume retrieval.", 422
+        )
     system_guard = GUARD
     if config.get("rag_enabled"):
         from .rag import RAG_GUARD
@@ -89,7 +91,7 @@ def generate(prompt, task, analysis, mode, config):
     key = os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         raise LLMError(
-            "Live AI is not configured. Add GEMINI_API_KEY to the backend .env file and restart, or choose Offline demo.",
+            "Live AI is not configured. Add GEMINI_API_KEY to the backend .env file and restart.",
             503,
         )
     model = config["model"]

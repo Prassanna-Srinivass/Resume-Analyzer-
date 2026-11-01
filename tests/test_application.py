@@ -23,7 +23,8 @@ def analysis(client):
     return response.json()
 
 
-def test_end_to_end_versions_comparison_feedback_and_history(client):
+def test_end_to_end_versions_comparison_feedback_and_history(client, monkeypatch):
+    monkeypatch.setattr(llm, "generate", lambda *a: "Grounded test response [D1-C1]")
     a = analysis(client)
     assert a["report"]["skill_coverage"] == 67
     prompts = client.get("/api/prompts").json()
@@ -46,9 +47,9 @@ def test_end_to_end_versions_comparison_feedback_and_history(client):
     assert response.status_code == 201
     runs = response.json()["runs"]
     assert len(runs) == 2 and runs[0]["prompt_text"] != runs[1]["prompt_text"]
-    assert runs[0]["model_name"] == runs[1]["model_name"] == "offline-evidence-demo-v1"
+    assert runs[0]["model_name"] == runs[1]["model_name"] == "gemini-3.5-flash-lite"
     assert runs[0]["generation_settings"] == runs[1]["generation_settings"]
-    assert "OFFLINE DEMO" in runs[0]["output_text"]
+    assert runs[0]["retrieval_snapshot"]["enabled"] is True
     feedback = {
         "relevance": 5,
         "accuracy": 4,
@@ -351,7 +352,10 @@ def test_concurrent_version_numbers_and_custom_template(client):
     )
 
 
-def test_unsaved_edit_snapshot_and_structured_extraction(client):
+def test_unsaved_edit_snapshot_and_structured_extraction(client, monkeypatch):
+    monkeypatch.setattr(
+        llm, "generate", lambda *a: '{"programming_languages": ["Python"]}'
+    )
     a = analysis(client)
     result = client.post(
         f"/api/analysis/{a['id']}/run-prompt",

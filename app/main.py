@@ -87,7 +87,7 @@ class TemplateInput(VersionInput):
 
 
 class RetrievalOptions(BaseModel):
-    rag_enabled: bool = False
+    rag_enabled: Literal[True] = True
     rag_query: str = Field(default="", max_length=1000)
     top_k: int = Field(default=5, ge=1, le=8, strict=True)
 
@@ -99,7 +99,7 @@ class PreviewInput(VersionInput, RetrievalOptions):
 class RunInput(RetrievalOptions):
     prompt_version_id: int = Field(gt=0)
     prompt_text: str | None = Field(default=None, max_length=20000)
-    mode: Literal["demo", "live"] = "demo"
+    mode: Literal["live"] = "live"
 
     @field_validator("prompt_text")
     @classmethod
@@ -112,7 +112,7 @@ class RunInput(RetrievalOptions):
 class CompareInput(RetrievalOptions):
     version_a: int = Field(gt=0)
     version_b: int = Field(gt=0)
-    mode: Literal["demo", "live"] = "demo"
+    mode: Literal["live"] = "live"
 
 
 class FeedbackInput(BaseModel):
@@ -172,12 +172,6 @@ def decode_run(row):
 
 
 def retrieval_for(analysis, request, mode=None):
-    if not request.rag_enabled:
-        return None
-    if mode == "demo":
-        raise HTTPException(
-            422, "RAG generation requires Live AI. Disable RAG to use the offline demo."
-        )
     try:
         return rag.retrieve(analysis, request.rag_query, request.top_k)
     except llm.LLMError as exc:
@@ -244,7 +238,7 @@ def health():
         "status": "ok",
         "live_available": bool(os.getenv("GEMINI_API_KEY", "").strip()),
         "live_model": llm.model_config("live")["model"],
-        "demo_model": llm.model_config("demo")["model"],
+        "rag_required": True,
         "embedding_model": os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001"),
     }
 
@@ -265,6 +259,12 @@ def upload(file: UploadFile = File(...)):
 
 @app.post("/api/analysis", status_code=201)
 def create_analysis(body: AnalysisInput):
+    try:
+        prepared = rag.prepare_resume(body.resume_text)
+    except llm.LLMError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     report = analyze(body.resume_text, body.job_description)
     with db.connect() as conn:
         aid = conn.execute(
@@ -276,6 +276,7 @@ def create_analysis(body: AnalysisInput):
                 json.dumps(report),
             ),
         ).lastrowid
+        rag.save_resume(conn, aid, prepared)
     return get_analysis(aid)
 
 
@@ -375,50 +376,27 @@ def list_documents(aid: int):
     return rag.documents(aid)
 
 
-@app.post("/api/analysis/{aid}/documents", status_code=201)
-def add_document(aid: int, file: UploadFile = File(...)):
-    try:
-        analysis = get_analysis(aid)
-        return rag.index_upload(analysis, file.filename, file.file.read(MAX_UPLOAD + 1))
-    except llm.LLMError as exc:
-        raise HTTPException(exc.status, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    finally:
-        file.file.close()
+@app.post("/api/analysis/{aid}/documents")
+def add_document(aid: int):
+    get_analysis(aid)
+    raise HTTPException(
+        410,
+        "Supporting documents have been removed. Only the saved resume is indexed automatically.",
+    )
 
 
-@app.post("/api/analysis/{aid}/index-resume", status_code=201)
-def index_resume(aid: int):
-    analysis = get_analysis(aid)
-    try:
-        return rag.index_document(
-            analysis,
-            "Saved resume",
-            [{"text": analysis["resume_text"], "page": None}],
-            "resume",
-        )
-    except llm.LLMError as exc:
-        raise HTTPException(exc.status, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-
-@app.delete("/api/analysis/{aid}/documents/{did}", status_code=204)
+@app.delete("/api/analysis/{aid}/documents/{did}")
 def delete_document(aid: int, did: int):
     get_analysis(aid)
-    with db.connect() as conn:
-        if not conn.execute(
-            "DELETE FROM rag_documents WHERE id=? AND analysis_id=?", (did, aid)
-        ).rowcount:
-            raise HTTPException(404, "Document not found in this analysis.")
+    raise HTTPException(
+        409,
+        "The resume index is required. Delete the analysis to remove its stored data.",
+    )
 
 
 @app.post("/api/analysis/{aid}/retrieve")
 def retrieve_evidence(aid: int, body: RetrievalOptions):
-    return retrieval_for(
-        get_analysis(aid), body.model_copy(update={"rag_enabled": True})
-    )
+    return retrieval_for(get_analysis(aid), body)
 
 
 @app.post("/api/analysis/{aid}/preview")

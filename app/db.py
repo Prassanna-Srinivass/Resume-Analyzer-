@@ -62,6 +62,11 @@ def initialize():
             document_id INTEGER NOT NULL REFERENCES rag_documents(id) ON DELETE CASCADE,
             position INTEGER NOT NULL, page INTEGER, text TEXT NOT NULL, embedding TEXT NOT NULL,
             UNIQUE(document_id, position));
+        CREATE TABLE IF NOT EXISTS rag_queries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis_id INTEGER NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
+            fingerprint TEXT NOT NULL, embedding TEXT NOT NULL,
+            UNIQUE(analysis_id, fingerprint));
         CREATE INDEX IF NOT EXISTS rag_documents_analysis ON rag_documents(analysis_id);
         CREATE INDEX IF NOT EXISTS rag_chunks_document ON rag_chunks(document_id);
         """)

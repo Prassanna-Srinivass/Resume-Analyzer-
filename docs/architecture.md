@@ -1,50 +1,48 @@
-# Implementation map
+# Mandatory resume RAG architecture
 
-The supplied documents describe an enhancement, but the requested repository was empty. No routes, prompts, UI or database existed to preserve. The implementation therefore adds a compact FastAPI analyzer plus the prompt module, without inventing pre-existing NLP/RAG components.
+The browser talks to FastAPI on the same origin. SQLite persists local application state; Gemini is the external embedding and generation service.
 
-## Data flow
+```mermaid
+flowchart TD
+    UI[Browser] --> API[FastAPI]
+    API --> Parse[Resume extraction and baseline]
+    Parse --> Index[Chunk and index resume]
+    Index --> Embed[Gemini embeddings]
+    Index --> DB[(SQLite)]
+    API --> Retrieve[Resume retrieval]
+    Retrieve --> DB
+    Retrieve --> Embed
+    Retrieve --> Prompt[Validated prompt and selected passages]
+    Prompt --> LLM[Gemini generation]
+    LLM --> History[Output and evidence snapshot]
+    History --> DB
+    History --> UI
+```
 
-1. `POST /api/upload` validates and extracts text (TXT/PDF/DOCX) without retaining the uploaded binary.
-2. `POST /api/analysis` saves immutable inputs and the transparent lexical/skill report.
-3. `prompts.py` owns six template seeds; `db.initialize` seeds them once.
-4. SQLite stores template identity and immutable versions. A serialized transaction allocates the next version number.
-5. The preview/run endpoints replace validated placeholders once, with the saved analysis values.
-6. `llm.generate` either runs an explicit deterministic demo or calls Google Gemini from the backend. There is no silent mode fallback.
-7. A run snapshots the base version ID, exact instructions (including unsaved edits), filled prompt, mode, model/configuration, output and analysis reference.
-8. Comparison uses two saved versions of one template, one immutable analysis and one captured model configuration. Both successful outputs are stored in one transaction. If either call fails, neither run is stored; the first provider call can still have incurred a charge.
-9. The UI renders output using textContent. Manual feedback attaches to the run. Deleting an analysis cascades to its runs; templates and versions remain reusable.
+## Save and retrieve
 
-## Storage
+PDF, DOCX and TXT uploads are extracted without retaining binaries. Saving an analysis prepares resume embeddings before opening a write transaction. The analysis and complete index are then committed together. Identical resume content and settings reuse persisted vectors; a new analysis still owns its own document/chunk records. Index failures leave no new analysis. Existing analyses without an index are upgraded lazily on retrieval.
 
-One SQLite database contains `templates`, `versions`, `analyses`, and `runs`. There is no second history store or vector database. Foreign keys and a unique `(template_id, version_number)` constraint protect links/version sequences. Timestamps are UTC; the UI displays browser-local time.
+Each resume is split into at most 80 chunks of 1,500 characters with 200-character overlap. Gemini creates 768-dimensional vectors using RETRIEVAL_DOCUMENT; normalized vectors are stored as JSON. A custom evidence question, or the first 1,000 characters of role plus job description, uses RETRIEVAL_QUERY. Query vectors are cached per analysis/query/settings with a maximum of 100 cached questions.
 
-## Frontend
+Retrieval scans only documents of kind `resume` belonging to the current analysis. Positive cosine matches are sorted and the top 1–8 are selected (default five). Gemini receives those passages as candidate evidence, not the full resume. A zero-match result explicitly says evidence is insufficient. Source IDs identify document and chunk; original PDF page positions are not retained after editable resume text is saved.
 
-The plain JavaScript UI is served by FastAPI on the same origin. Its views are Resume analysis, Prompt studio and Analysis history. No build tool, framework, CDN or frontend API key is required. The optional Node preview runner is separate from normal Python startup.
+## Prompt and history
 
-## Scope mapping
+Five validated variables support immutable template versions. The required resume_text variable receives selected passages, while extracted_skills is recalculated from those passages. Resume content is never interpreted as template code. Server-side instructions treat all source content as untrusted data and require evidence citations. Checks detect missing or unknown source IDs, not factual entailment.
 
-| Supplied requirement | Implementation |
+Comparisons retrieve once, generate twice using the same snapshot, and save both runs atomically. An error on the second provider call leaves no partial pair, though the first call may have incurred charges. Feedback is manual. The UI renders output through textContent.
+
+## Tables
+
+| Table | Data |
 |---|---|
-| Preserve existing analyzer | Repository was empty; minimal analyzer foundation supplied |
-| Reusable prompts | Six templates, plus custom-template creation |
-| Prompt editor and preview | Editable instructions, validated one-pass substitution |
-| Version history | Immutable revisions with notes and timestamps |
-| Same-input comparison | Same analysis/model/settings; both prompt texts and outputs shown |
-| Manual evaluation | Four 1–5 ratings and feedback note |
-| Analysis history | Restore, reuse, export, delete |
-| Existing LLM integration | None existed; one Google Gemini adapter supplied |
-| Existing semantic/RAG components | None existed; explicitly documented future work |
-| Docker / CI/CD | Not added |
+| templates | Reusable task identity |
+| versions | Immutable prompt revisions and notes |
+| analyses | Saved resume, job, role and local baseline report |
+| rag_documents | Resume fingerprint and embedding settings per analysis |
+| rag_chunks | Passage text, position and vector |
+| rag_queries | Cached query vector scoped by analysis and settings |
+| runs | Exact prompt/output, retrieval snapshot, model, settings and feedback |
 
-## Optional RAG path (Python edition)
-
-`app/rag.py` extracts supporting documents into page-aware text sections, splits them into at most 80 chunks of 1,500 characters with 200-character overlap, requests 768-dimensional Gemini embeddings, normalizes vectors, and stores them in SQLite. Each saved analysis owns an independent collection of up to 10 documents. PDF page numbers are preserved; DOCX/TXT are cited by chunk because pagination is not reliably defined. Resume indexing uses saved text and therefore has chunk references, not original PDF page references.
-
-`rag_documents` stores analysis association, filename, source kind, content/settings fingerprint and model metadata. `rag_chunks` stores passages, page/position and vector JSON. Both cascade on analysis deletion. Repeated identical content/settings within the same analysis reuses its index. Different analyses do not share evidence. Model changes require explicit removal and reindexing; mixed-model comparisons are rejected.
-
-At request time, a user question (or up to 1,000 characters of the role/job description) is embedded with RETRIEVAL_QUERY. Exact cosine search selects up to eight positive-similarity passages. The full original resume remains in context as [RESUME]; retrieved support augments it, so token/cost reduction is not guaranteed. The job description is requirements data, never candidate evidence.
-
-`main.py` retrieves once for a two-prompt comparison and passes the same snapshot into both runs. `llm.py` uses the RAG system guard for these runs. `{{retrieved_context}}` is optional: evidence is appended when it is absent, preserving existing immutable templates. Runs store the exact retrieval settings, query, passages and source-ID checks in an added nullable `retrieval_snapshot` column; old runs remain readable.
-
-Source-ID validation only detects missing or unknown citation IDs, not whether an excerpt actually supports the claim. Documents are untrusted input and instructions contained in them are not authorized. Removing a document stops future retrieval but does not erase historical snapshots; deleting the analysis removes its snapshots, chunks and documents. Previously exported JSON files and external provider retention are outside this deletion boundary.
+Deleting an analysis cascades to its runs, documents, chunks and query cache. Replacing an index after model/settings changes is atomic; a failed refresh preserves the old index and stops generation. Old supporting documents are ignored by new retrieval. Historical runs are preserved with their exact snapshots. Old offline runs remain readable but no new API run may use offline mode or disable RAG.
