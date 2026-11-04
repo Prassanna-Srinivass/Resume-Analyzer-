@@ -42,13 +42,14 @@ def test_end_to_end_versions_comparison_feedback_and_history(client, monkeypatch
     assert a["resume_text"] in preview["rendered_prompt"]
     response = client.post(
         f"/api/analysis/{a['id']}/compare",
-        json={"version_a": p["version_id"], "version_b": v2["id"]},
+        json={"version_a": p["version_id"], "version_b": v2["id"], "temperature": 0.4},
     )
     assert response.status_code == 201
     runs = response.json()["runs"]
     assert len(runs) == 2 and runs[0]["prompt_text"] != runs[1]["prompt_text"]
     assert runs[0]["model_name"] == runs[1]["model_name"] == "gemini-3.5-flash-lite"
     assert runs[0]["generation_settings"] == runs[1]["generation_settings"]
+    assert runs[0]["generation_settings"]["temperature"] == 0.4
     assert runs[0]["retrieval_snapshot"]["enabled"] is True
     feedback = {
         "relevance": 5,
@@ -263,7 +264,8 @@ def test_provider_failures_sanitize_response(monkeypatch, status, expected):
     )
 
 
-def test_timeout_and_live_success(monkeypatch):
+@pytest.mark.parametrize("temperature", [None, 0.0, 2.0])
+def test_timeout_and_live_success(monkeypatch, temperature):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
 
     def timeout(*args, **kwargs):
@@ -283,7 +285,10 @@ def test_timeout_and_live_success(monkeypatch):
             kwargs["json"]["contents"][0]["parts"][0]["text"] == "exact rendered prompt"
         )
         assert kwargs["headers"]["x-goog-api-key"] == "test-key"
-        assert "temperature" not in kwargs["json"]["generationConfig"]
+        if temperature is None:
+            assert "temperature" not in kwargs["json"]["generationConfig"]
+        else:
+            assert kwargs["json"]["generationConfig"]["temperature"] == temperature
         assert kwargs["json"]["generationConfig"]["maxOutputTokens"] == 4096
         assert "test-key" not in url
         return httpx.Response(
@@ -301,7 +306,7 @@ def test_timeout_and_live_success(monkeypatch):
     monkeypatch.setattr(httpx.Client, "post", success)
     assert (
         llm.generate(
-            "exact rendered prompt", "summary", {}, "live", llm.model_config("live")
+            "exact rendered prompt", "summary", {}, "live", llm.model_config("live", temperature)
         )
         == "Evidence grounded response"
     )

@@ -247,6 +247,16 @@ bind('preview-prompt', async () => {
     $('preview-panel').open = true;
 });
 
+function generationOptions() {
+    const input = $('temperature');
+    if (!input.reportValidity()) throw new Error('Enter a temperature between 0 and 2.');
+    return {mode: 'live', temperature: input.value === '' ? null : input.valueAsNumber};
+}
+
+function temperatureLabel(run) {
+    return run.mode === 'live' ? ` · Temperature: ${run.generation_settings?.temperature ?? 'model default'}` : '';
+}
+
 function showRun(run) {
     state.run = run;
     renderEvidence($('run-evidence'), run.retrieval_snapshot);
@@ -255,17 +265,18 @@ function showRun(run) {
     $('single-output').textContent = ResumeOutput.format(run.output_text);
     $('single-output').classList.remove('empty-output');
     $('output-mode').textContent = run.mode === 'demo' ? 'Offline demo · not AI' : 'Live AI';
-    $('run-meta').textContent = `Run #${run.id} · ${run.model_name} · ${date(run.created_at)} · ${run.prompt_name}`;
+    $('run-meta').textContent = `Run #${run.id} · ${run.model_name}${temperatureLabel(run)} · ${date(run.created_at)} · ${run.prompt_name}`;
     $('feedback-panel').hidden = false;
     for (const k of ['relevance', 'accuracy', 'coverage', 'clarity']) $(`rating-${k}`).value = run.feedback?.[k] || '';
     $('feedback-note').value = run.feedback?.note || '';
 }
 bind('run-prompt', async () => {
+    const settings = generationOptions();
     const a = await ensureAnalysis();
     const run = await post(`/api/analysis/${a.id}/run-prompt`, {
         prompt_version_id: Number($('version-select').value),
         prompt_text: $('prompt-editor').value,
-        mode: 'live',
+        ...settings,
         ...ragOptions()
     });
     showRun(run);
@@ -284,18 +295,19 @@ bind('save-feedback', async () => {
     notify('Your evaluation has been saved with this run.');
 });
 bind('compare', async () => {
+    const settings = generationOptions();
     if (state.template.versions.length < 2) throw new Error('Edit the prompt and save a second version first.');
     const a = await ensureAnalysis();
     const result = await post(`/api/analysis/${a.id}/compare`, {
         version_a: Number($('compare-a').value),
         version_b: Number($('compare-b').value),
-        mode: 'live',
+        ...settings,
         ...ragOptions()
     });
     $('comparison-output').replaceChildren(...result.runs.map((run, i) => {
         const v = state.template.versions.find(v => v.id === run.prompt_version_id);
         const box = node('article', undefined, 'compare-result');
-        box.append(node('h3', `${i?'B':'A'} · Version ${v.version_number}`), node('p', `${run.model_name} · ${run.mode==='demo'?'Deterministic demo':'Live AI'}`, 'helper'));
+        box.append(node('h3', `${i?'B':'A'} · Version ${v.version_number}`), node('p', `${run.model_name} · ${run.mode==='demo'?'Deterministic demo':'Live AI'}${temperatureLabel(run)}`, 'helper'));
         const d = node('details');
         d.append(node('summary', 'View exact prompt instructions'), node('pre', run.prompt_text));
         const evaluate = node('button', 'Evaluate this output', 'button secondary');

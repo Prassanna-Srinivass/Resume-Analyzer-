@@ -13,13 +13,16 @@ class LLMError(Exception):
         self.status = status
 
 
-def model_config(mode):
+def model_config(mode, temperature=None):
     if mode == "demo":
         return {"model": "offline-evidence-demo-v1", "temperature": None}
-    return {
+    config = {
         "model": os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip(),
         "max_output_tokens": 4096,
     }
+    if temperature is not None:
+        config["temperature"] = temperature
+    return config
 
 
 def demo_output(task, analysis):
@@ -100,6 +103,9 @@ def generate(prompt, task, analysis, mode, config):
             "GEMINI_MODEL must be a model ID such as gemini-3.5-flash-lite, without a URL or models/ prefix.",
             503,
         )
+    generation_config = {"maxOutputTokens": config.get("max_output_tokens", 4096)}
+    if "temperature" in config:
+        generation_config["temperature"] = config["temperature"]
     try:
         with httpx.Client(timeout=httpx.Timeout(60, connect=10)) as client:
             response = client.post(
@@ -108,9 +114,7 @@ def generate(prompt, task, analysis, mode, config):
                 json={
                     "systemInstruction": {"parts": [{"text": system_guard}]},
                     "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "maxOutputTokens": config.get("max_output_tokens", 4096)
-                    },
+                    "generationConfig": generation_config,
                 },
             )
         if response.status_code == 429:
