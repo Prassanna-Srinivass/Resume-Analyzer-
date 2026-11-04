@@ -37,7 +37,74 @@
         } catch (_) { /* Ordinary prose or incomplete JSON stays verbatim. */ }
         return original;
     }
-    const api = {format};
+    function appendInline(parent, text) {
+        for (const part of text.split(/(\*\*[^*\n]+\*\*)/g)) {
+            if (part.length > 4 && part.startsWith('**') && part.endsWith('**')) {
+                const strong = document.createElement('strong');
+                strong.textContent = part.slice(2, -2);
+                parent.append(strong);
+            } else {
+                parent.append(part);
+            }
+        }
+    }
+
+    function render(text) {
+        const result = document.createElement('div');
+        result.className = 'report-body';
+        const readable = format(text);
+        if (readable !== text || !/^(?:#{1,6}\s|\s*(?:[-*+] |\d+\. ))|\*\*[^*\n]+\*\*/m.test(readable)) {
+            result.textContent = readable;
+            return result;
+        }
+
+        const lists = [];
+        let paragraph;
+        for (const line of readable.split(/\r?\n/)) {
+            if (!line.trim()) {
+                paragraph = null;
+                continue;
+            }
+            const item = line.match(/^(\s*)([-*+]|\d+\.)\s+(.+)$/);
+            if (item) {
+                paragraph = null;
+                const indent = item[1].replace(/\t/g, '    ').length;
+                const ordered = item[2].endsWith('.');
+                const tag = ordered ? 'ol' : 'ul';
+                while (lists.length && lists.at(-1).indent > indent) lists.pop();
+                if (lists.at(-1)?.indent === indent && lists.at(-1).tag !== tag) lists.pop();
+                if (lists.at(-1)?.indent !== indent) {
+                    const list = document.createElement(tag);
+                    if (ordered) list.start = parseInt(item[2], 10);
+                    (lists.at(-1)?.list.lastElementChild || result).append(list);
+                    lists.push({indent, tag, list});
+                }
+                const li = document.createElement('li');
+                appendInline(li, item[3]);
+                lists.at(-1).list.append(li);
+                continue;
+            }
+            lists.length = 0;
+            const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+)$/);
+            if (heading) {
+                const title = document.createElement('h' + heading[1].length);
+                appendInline(title, heading[2]);
+                result.append(title);
+                paragraph = null;
+            } else {
+                if (!paragraph) {
+                    paragraph = document.createElement('p');
+                    result.append(paragraph);
+                } else {
+                    paragraph.append('\n');
+                }
+                appendInline(paragraph, line);
+            }
+        }
+        return result;
+    }
+
+    const api = {format, render};
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.ResumeOutput = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

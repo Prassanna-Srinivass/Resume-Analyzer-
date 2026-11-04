@@ -840,6 +840,18 @@ input::placeholder {
     min-height: 250px
 }
 
+.report-body :is(h1, h2, h3, h4, h5, h6) {
+    margin: 1.2em 0 .35em;
+    color: #243e44;
+    line-height: 1.35
+}
+
+.report-body p { margin: .45em 0 }
+.report-body :is(ul, ol) { margin: .4em 0; padding-left: 1.65em }
+.report-body li { margin: .25em 0 }
+.report-body > :first-child { margin-top: 0 }
+.report-body > :last-child { margin-bottom: 0 }
+
 .empty-output {
     color: #9aa8a2;
     display: flex;

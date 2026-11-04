@@ -257,12 +257,18 @@ function temperatureLabel(run) {
     return run.mode === 'live' ? ` · Temperature: ${run.generation_settings?.temperature ?? 'model default'}` : '';
 }
 
+function reportOutput(text) {
+    const container = node('div', undefined, 'output');
+    container.append(ResumeOutput.render(text));
+    return container;
+}
+
 function showRun(run) {
     state.run = run;
     renderEvidence($('run-evidence'), run.retrieval_snapshot);
     $('run-evidence-section').hidden = !run.retrieval_snapshot;
     $('run-evidence-meta').textContent = `Run #${run.id} · ${run.prompt_name} · ${date(run.created_at)}`;
-    $('single-output').textContent = ResumeOutput.format(run.output_text);
+    $('single-output').replaceChildren(ResumeOutput.render(run.output_text));
     $('single-output').classList.remove('empty-output');
     $('output-mode').textContent = run.mode === 'demo' ? 'Offline demo · not AI' : 'Live AI';
     $('run-meta').textContent = `Run #${run.id} · ${run.model_name}${temperatureLabel(run)} · ${date(run.created_at)} · ${run.prompt_name}`;
@@ -318,7 +324,7 @@ bind('compare', async () => {
                 block: 'center'
             });
         });
-        box.append(d, node('pre', ResumeOutput.format(run.output_text), 'output'), evaluate);
+        box.append(d, reportOutput(run.output_text), evaluate);
         return box;
     }));
     renderEvidence($('retrieved-evidence'), result.runs[0].retrieval_snapshot);
@@ -405,7 +411,7 @@ async function loadRuns() {
     $('history-context').textContent = `Analysis #${state.analysis.id} · ${state.analysis.target_role||'Untitled role'} · ${state.runs.length} prompt runs`;
     for (const run of state.runs) {
         const box = node('article', undefined, 'history-run');
-        box.append(node('h3', `#${run.id} · ${run.prompt_name}`), node('p', `${run.model_name} · ${date(run.created_at)}`), node('pre', ResumeOutput.format(run.output_text), 'output'));
+        box.append(node('h3', `#${run.id} · ${run.prompt_name}`), node('p', `${run.model_name} · ${date(run.created_at)}`), reportOutput(run.output_text));
         const details = node('details');
         details.append(node('summary', 'Exact prompt and saved evaluation'), node('pre', run.rendered_prompt + '\n\nORIGINAL MODEL RESPONSE\n' + run.output_text + '\n\nRETRIEVAL SNAPSHOT\n' + JSON.stringify(run.retrieval_snapshot, null, 2) + '\n\nEVALUATION\n' + (run.feedback ? JSON.stringify(run.feedback, null, 2) : 'Not rated yet')));
         box.append(details);
