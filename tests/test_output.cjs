@@ -39,3 +39,35 @@ test('report rendering groups headings, labels and nested evidence under the rig
     assert.equal(nextRole.textContent, 'Web Development Intern');
     assert.equal(report.children[3].children[0], 'Built <img src=x> dashboards.');
 });
+
+test('the app can display saved output with a current, cached, or missing formatter', () => {
+    const {readFileSync} = require('node:fs');
+    const vm = require('node:vm');
+    const element = () => ({
+        addEventListener() {}, setAttribute() {}, classList: {remove() {}},
+        append(child) { this.content = child; },
+        replaceChildren(child) { this.content = child; }
+    });
+    const elements = new Map();
+    const document = {
+        body: element(), createElement: element, querySelectorAll: () => [],
+        getElementById(id) {
+            if (!elements.has(id)) elements.set(id, element());
+            return elements.get(id);
+        }
+    };
+    const context = vm.createContext({document, FormData, fetch: () => new Promise(() => {})});
+    vm.runInContext(readFileSync(require.resolve('../app/static/app.js'), 'utf8'), context);
+    const text = 'A saved report [D3-C1]';
+    const formattedNode = element();
+    for (const [formatter, expected] of [
+        [{render: () => formattedNode}, formattedNode],
+        [{format: value => 'Formatted: ' + value}, 'Formatted: ' + text],
+        [undefined, text]
+    ]) {
+        context.ResumeOutput = formatter;
+        context.showRun({output_text: text, mode: 'live'});
+        assert.equal(document.getElementById('single-output').content, expected);
+        assert.equal(context.reportOutput(text).content, expected);
+    }
+});
