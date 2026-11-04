@@ -96,10 +96,14 @@ class PreviewInput(VersionInput, RetrievalOptions):
     pass
 
 
-class RunInput(RetrievalOptions):
+class GenerationOptions(RetrievalOptions):
+    mode: Literal["live"] = "live"
+    temperature: float | None = Field(default=None, ge=0, le=2, strict=True)
+
+
+class RunInput(GenerationOptions):
     prompt_version_id: int = Field(gt=0)
     prompt_text: str | None = Field(default=None, max_length=20000)
-    mode: Literal["live"] = "live"
 
     @field_validator("prompt_text")
     @classmethod
@@ -109,10 +113,9 @@ class RunInput(RetrievalOptions):
         return value
 
 
-class CompareInput(RetrievalOptions):
+class CompareInput(GenerationOptions):
     version_a: int = Field(gt=0)
     version_b: int = Field(gt=0)
-    mode: Literal["live"] = "live"
 
 
 class FeedbackInput(BaseModel):
@@ -423,7 +426,7 @@ def run_prompt(aid: int, body: RunInput):
     analysis = get_analysis(aid)
     get_version(body.prompt_version_id)  # Validate before any billable retrieval.
     snapshot = retrieval_for(analysis, body, body.mode)
-    config = llm.model_config(body.mode)
+    config = llm.model_config(body.mode, body.temperature)
     if snapshot:
         config["rag_enabled"] = True
     record = prepare_run(analysis, body, config, snapshot)
@@ -438,7 +441,7 @@ def compare(aid: int, body: CompareInput):
     va, vb = get_version(body.version_a), get_version(body.version_b)
     if va["template_id"] != vb["template_id"]:
         raise HTTPException(422, "Compare versions of the same prompt template.")
-    analysis, config = get_analysis(aid), llm.model_config(body.mode)
+    analysis, config = get_analysis(aid), llm.model_config(body.mode, body.temperature)
     snapshot = retrieval_for(analysis, body, body.mode)
     if snapshot:
         config["rag_enabled"] = True
