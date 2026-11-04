@@ -257,9 +257,16 @@ function temperatureLabel(run) {
     return run.mode === 'live' ? ` · Temperature: ${run.generation_settings?.temperature ?? 'model default'}` : '';
 }
 
+function reportContent(text) {
+    const formatter = globalThis.ResumeOutput;
+    if (typeof formatter?.render === 'function') return formatter.render(text);
+    if (typeof formatter?.format === 'function') return formatter.format(text);
+    return text;
+}
+
 function reportOutput(text) {
     const container = node('div', undefined, 'output');
-    container.append(ResumeOutput.render(text));
+    container.append(reportContent(text));
     return container;
 }
 
@@ -268,7 +275,7 @@ function showRun(run) {
     renderEvidence($('run-evidence'), run.retrieval_snapshot);
     $('run-evidence-section').hidden = !run.retrieval_snapshot;
     $('run-evidence-meta').textContent = `Run #${run.id} · ${run.prompt_name} · ${date(run.created_at)}`;
-    $('single-output').replaceChildren(ResumeOutput.render(run.output_text));
+    $('single-output').replaceChildren(reportContent(run.output_text));
     $('single-output').classList.remove('empty-output');
     $('output-mode').textContent = run.mode === 'demo' ? 'Offline demo · not AI' : 'Live AI';
     $('run-meta').textContent = `Run #${run.id} · ${run.model_name}${temperatureLabel(run)} · ${date(run.created_at)} · ${run.prompt_name}`;
