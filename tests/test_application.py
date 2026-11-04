@@ -248,7 +248,11 @@ def test_live_missing_key_is_clear_no_demo_fallback(client):
     assert client.get(f"/api/analysis/{a['id']}/prompt-runs").json() == []
 
 
-@pytest.mark.parametrize("status,expected", [(429, 429), (401, 502), (500, 502)])
+@pytest.mark.parametrize(
+    "status,expected",
+    [(400, 502), (401, 502), (403, 502), (404, 502), (429, 429),
+     (500, 502), (502, 502), (503, 502), (504, 502), (418, 502)],
+)
 def test_provider_failures_sanitize_response(monkeypatch, status, expected):
     monkeypatch.setenv("GEMINI_API_KEY", "test-secret-never-log")
 
@@ -259,6 +263,8 @@ def test_provider_failures_sanitize_response(monkeypatch, status, expected):
     with pytest.raises(llm.LLMError) as result:
         llm.generate("prompt", "summary", {}, "live", llm.model_config("live"))
     assert result.value.status == expected
+    assert f"HTTP {status}" in str(result.value)
+    assert llm.model_config("live")["model"] in str(result.value)
     assert "sensitive" not in str(result.value) and "test-secret" not in str(
         result.value
     )

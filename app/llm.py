@@ -117,21 +117,23 @@ def generate(prompt, task, analysis, mode, config):
                     "generationConfig": generation_config,
                 },
             )
-        if response.status_code == 429:
-            raise LLMError(
-                "Gemini rate limit or quota reached. Check your Google API billing/quota or retry later.",
-                429,
-            )
-        if response.status_code in (400, 401, 403):
-            raise LLMError(
-                "Gemini rejected the request. Check GEMINI_API_KEY, GEMINI_MODEL, and access for your Google API project."
-            )
-        if response.status_code == 404:
-            raise LLMError(
-                "The configured Gemini model was not found or is not available to this API project. Check GEMINI_MODEL."
-            )
         if response.is_error:
-            raise LLMError("Gemini could not complete the request. Please retry later.")
+            status = response.status_code
+            guidance = {
+                400: "Check the model and generation parameters.",
+                401: "Check the API key loaded by the backend.",
+                403: "Check the API key restrictions and model access for this project.",
+                404: "Check that GEMINI_MODEL is available to this API project.",
+                429: "Rate limit or quota reached. Check the project's Gemini quota before retrying.",
+                500: "The generation service encountered an internal error. Retry later.",
+                502: "The upstream gateway returned an invalid response. Retry later.",
+                503: "The generation service is unavailable. Wait briefly before retrying.",
+                504: "The upstream request timed out. Try a shorter prompt or fewer retrieved passages.",
+            }.get(status, "Check the upstream HTTP status when troubleshooting this request.")
+            raise LLMError(
+                f"Gemini generation request for {model} returned HTTP {status}. {guidance}",
+                429 if status == 429 else 502,
+            )
         body = response.json()
         if body.get("promptFeedback", {}).get("blockReason"):
             raise LLMError(
